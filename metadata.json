@@ -1,0 +1,8 @@
+{
+  "name": " terrain-generator",
+  "description": "remix from reguest5171@gmail.com ",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
