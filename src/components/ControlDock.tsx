@@ -110,6 +110,8 @@ interface ControlDockProps {
   onTabChange?: (tab: TabType) => void;
   onTidyUpScene?: () => void;
   onResetTrailColors?: () => void;
+  isRoadBuilderActive?: boolean;
+  onToggleRoadBuilder?: () => void;
 }
 
 type TabType = 'terrain' | 'sculpt' | 'place' | 'lighting' | 'assets' | 'export';
@@ -181,6 +183,8 @@ export const ControlDock: React.FC<ControlDockProps> = ({
   onTabChange,
   onTidyUpScene,
   onResetTrailColors,
+  isRoadBuilderActive = false,
+  onToggleRoadBuilder,
 }) => {
   const [internalTab, setInternalTab] = useState<TabType>('terrain');
   const activeTab = propsActiveTab ?? internalTab;
@@ -250,144 +254,153 @@ export const ControlDock: React.FC<ControlDockProps> = ({
   return (
     <section
       aria-label="Terrain and Object Controls"
-      className={`fixed bottom-4 left-1/2 -translate-x-1/2 w-[95vw] max-w-4xl z-30 transition-transform duration-150 select-none ${
-        isCollapsed ? 'translate-y-[calc(100%-42px)]' : 'translate-y-0'
+      className={`fixed bottom-2 sm:bottom-4 left-1/2 -translate-x-1/2 w-full max-w-4xl px-2 sm:px-4 z-30 transition-transform duration-200 select-none ${
+        isCollapsed ? 'translate-y-[calc(100%-48px)]' : 'translate-y-0'
       }`}
     >
       {/* Collapse / Expand Header Bar */}
-      <div className="flex justify-between items-center bg-slate-950/85 border-t border-x border-slate-800/80 rounded-t-2xl px-3.5 py-1.5 shadow-2xl">
-        {/* Navigation Tabs */}
-        <div className="flex items-center gap-1 overflow-x-auto scrollbar-none py-0.5">
-          <button
-            type="button"
-            onClick={() => {
-              setActiveTab('terrain');
-              if (brushSettings.mode.startsWith('sculpt') || brushSettings.mode === 'place') {
-                onUpdateBrushSettings({ mode: 'select' });
-              }
-            }}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap shrink-0 transition-all ${
-              activeTab === 'terrain'
-                ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/40 shadow-sm'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/70 border border-transparent'
-            }`}
-          >
-            <Globe className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Biomes & </span><span>Terrain</span>
-          </button>
+      <div className="bg-slate-950/90 backdrop-blur-xl border-t border-x border-slate-800/80 rounded-t-2xl px-2.5 sm:px-3.5 pt-1.5 pb-1 shadow-2xl">
+        {/* Subtle Mobile Drag Pill Indicator */}
+        <div 
+          onClick={onToggleCollapse} 
+          className="w-10 h-1 bg-slate-700/80 hover:bg-slate-500 rounded-full mx-auto mb-1.5 sm:hidden cursor-pointer" 
+          title={isCollapsed ? 'Buka Menu Dock' : 'Tutup Menu Dock'}
+        />
 
-          <button
-            type="button"
-            onClick={() => {
-              setActiveTab('sculpt');
-              if (!brushSettings.mode.startsWith('sculpt')) {
-                onUpdateBrushSettings({ mode: 'sculpt-raise' });
-              }
-            }}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap shrink-0 transition-all ${
-              activeTab === 'sculpt'
-                ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/40 shadow-sm'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/70 border border-transparent'
-            }`}
-          >
-            <Mountain className="w-3.5 h-3.5" />
-            <span>Sculpt</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              setActiveTab('place');
-              if (brushSettings.mode !== 'place') {
-                onUpdateBrushSettings({ mode: 'place' });
-                if (!activePaletteItem && STANDARD_PALETTE.length > 0) {
-                  onSelectPaletteItem(STANDARD_PALETTE[0]);
+        <div className="flex justify-between items-center gap-1">
+          {/* Navigation Tabs with 44px touch targets */}
+          <div className="flex items-center gap-1 overflow-x-auto scrollbar-none py-0.5 touch-pan-x">
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab('terrain');
+                if (brushSettings.mode.startsWith('sculpt') || brushSettings.mode === 'place') {
+                  onUpdateBrushSettings({ mode: 'select' });
                 }
-              }
-            }}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap shrink-0 transition-all ${
-              activeTab === 'place'
-                ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/40 shadow-sm'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/70 border border-transparent'
-            }`}
-          >
-            <PackagePlus className="w-3.5 h-3.5" />
-            <span>Place</span>
-          </button>
+              }}
+              className={`flex items-center gap-1.5 px-3 py-2 min-h-[44px] rounded-xl text-xs font-semibold whitespace-nowrap shrink-0 transition-all active:scale-95 ${
+                activeTab === 'terrain'
+                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/50 shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/70 border border-transparent'
+              }`}
+            >
+              <Globe className="w-4 h-4" />
+              <span>Terrain</span>
+            </button>
 
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab('sculpt');
+                if (!brushSettings.mode.startsWith('sculpt')) {
+                  onUpdateBrushSettings({ mode: 'sculpt-raise' });
+                }
+              }}
+              className={`flex items-center gap-1.5 px-3 py-2 min-h-[44px] rounded-xl text-xs font-semibold whitespace-nowrap shrink-0 transition-all active:scale-95 ${
+                activeTab === 'sculpt'
+                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/50 shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/70 border border-transparent'
+              }`}
+            >
+              <Mountain className="w-4 h-4" />
+              <span>Sculpt</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab('place');
+                if (brushSettings.mode !== 'place') {
+                  onUpdateBrushSettings({ mode: 'place' });
+                  if (!activePaletteItem && STANDARD_PALETTE.length > 0) {
+                    onSelectPaletteItem(STANDARD_PALETTE[0]);
+                  }
+                }
+              }}
+              className={`flex items-center gap-1.5 px-3 py-2 min-h-[44px] rounded-xl text-xs font-semibold whitespace-nowrap shrink-0 transition-all active:scale-95 ${
+                activeTab === 'place'
+                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/50 shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/70 border border-transparent'
+              }`}
+            >
+              <PackagePlus className="w-4 h-4" />
+              <span>Place</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab('lighting');
+                if (brushSettings.mode.startsWith('sculpt') || brushSettings.mode === 'place') {
+                  onUpdateBrushSettings({ mode: 'select' });
+                }
+              }}
+              className={`flex items-center gap-1.5 px-3 py-2 min-h-[44px] rounded-xl text-xs font-semibold whitespace-nowrap shrink-0 transition-all active:scale-95 ${
+                activeTab === 'lighting'
+                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/50 shadow-sm font-bold'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/70 border border-transparent'
+              }`}
+            >
+              <Sun className="w-4 h-4 text-amber-400" />
+              <span>Cahaya</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('assets')}
+              className={`flex items-center gap-1.5 px-3 py-2 min-h-[44px] rounded-xl text-xs font-semibold whitespace-nowrap shrink-0 transition-all active:scale-95 ${
+                activeTab === 'assets'
+                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/50 shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/70 border border-transparent'
+              }`}
+            >
+              <Box className="w-4 h-4" />
+              <span>GLB</span>
+              {customAssets.length > 0 && (
+                <span className="text-[10px] bg-emerald-700/60 text-emerald-200 px-1.5 py-0.2 rounded-full font-bold">
+                  {customAssets.length}
+                </span>
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('export')}
+              className={`flex items-center gap-1.5 px-3 py-2 min-h-[44px] rounded-xl text-xs font-semibold whitespace-nowrap shrink-0 transition-all active:scale-95 ${
+                activeTab === 'export'
+                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/50 shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/70 border border-transparent'
+              }`}
+            >
+              <Download className="w-4 h-4" />
+              <span>Export</span>
+            </button>
+          </div>
+
+          {/* Toggle Collapse Button with 44px min touch target */}
           <button
             type="button"
-            onClick={() => {
-              setActiveTab('lighting');
-              if (brushSettings.mode.startsWith('sculpt') || brushSettings.mode === 'place') {
-                onUpdateBrushSettings({ mode: 'select' });
-              }
-            }}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap shrink-0 transition-all ${
-              activeTab === 'lighting'
-                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm font-bold'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/70 border border-transparent'
-            }`}
+            onClick={onToggleCollapse}
+            aria-label={isCollapsed ? 'Expand Dock Controls' : 'Collapse Dock Controls'}
+            className="flex items-center justify-center gap-1 text-slate-300 hover:text-white text-xs px-2.5 py-2 min-h-[44px] min-w-[44px] rounded-xl hover:bg-slate-900/90 transition-all ml-1 shrink-0 active:scale-95"
           >
-            <Sun className="w-3.5 h-3.5 text-amber-400" />
-            <span>Waktu & Cahaya</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveTab('assets')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap shrink-0 transition-all ${
-              activeTab === 'assets'
-                ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/40 shadow-sm'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/70 border border-transparent'
-            }`}
-          >
-            <Box className="w-3.5 h-3.5" />
-            <span>Custom GLB</span>
-            {customAssets.length > 0 && (
-              <span className="text-[10px] bg-emerald-700/60 text-emerald-200 px-1.5 py-0.2 rounded-full font-bold">
-                {customAssets.length}
-              </span>
+            {isCollapsed ? (
+              <>
+                <ChevronUp className="w-5 h-5 text-emerald-400" />
+                <span className="hidden sm:inline font-medium">Buka</span>
+              </>
+            ) : (
+              <>
+                <ChevronDown className="w-5 h-5 text-slate-400" />
+                <span className="hidden sm:inline font-medium">Tutup</span>
+              </>
             )}
           </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveTab('export')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap shrink-0 transition-all ${
-              activeTab === 'export'
-                ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/40 shadow-sm'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/70 border border-transparent'
-            }`}
-          >
-            <Download className="w-3.5 h-3.5" />
-            <span>Export 3D</span>
-          </button>
         </div>
-
-        {/* Toggle Collapse Button */}
-        <button
-          type="button"
-          onClick={onToggleCollapse}
-          aria-label={isCollapsed ? 'Expand Dock Controls' : 'Collapse Dock Controls'}
-          className="flex items-center gap-1 text-slate-400 hover:text-white text-xs px-2 py-1 rounded-lg hover:bg-slate-900 transition-colors ml-2"
-        >
-          {isCollapsed ? (
-            <>
-              <ChevronUp className="w-4 h-4" />
-              <span className="hidden sm:inline font-medium">Buka</span>
-            </>
-          ) : (
-            <>
-              <ChevronDown className="w-4 h-4" />
-              <span className="hidden sm:inline font-medium">Tutup</span>
-            </>
-          )}
-        </button>
       </div>
 
       {/* Dock Content Body */}
-      <div className="bg-slate-950/85 border-b border-x border-slate-800/80 rounded-b-2xl p-4 shadow-2xl max-h-[38vh] overflow-y-auto">
+      <div className="bg-slate-950/90 backdrop-blur-xl border-b border-x border-slate-800/80 rounded-b-2xl p-3 sm:p-4 shadow-2xl max-h-[44vh] sm:max-h-[38vh] overflow-y-auto overscroll-contain touch-pan-y">
         {/* Selected Object Floating Inspector Bar */}
         {selectedObject && (
           <div className="mb-3 p-2.5 rounded-xl bg-slate-800/90 border border-amber-500/50 flex flex-wrap items-center justify-between gap-2 shadow-inner">
@@ -910,6 +923,21 @@ export const ControlDock: React.FC<ControlDockProps> = ({
 
               {/* Action Buttons: Auto Build Scenic Trail & Tidy Up Scene */}
               <div className="flex items-center gap-2 flex-wrap">
+                {onToggleRoadBuilder && (
+                  <button
+                    type="button"
+                    onClick={onToggleRoadBuilder}
+                    className={`flex items-center gap-1.5 px-3.5 py-1.5 min-h-[36px] rounded-lg text-xs font-bold transition-all shadow-md active:scale-95 cursor-pointer ${
+                      isRoadBuilderActive
+                        ? 'bg-gradient-to-r from-emerald-600 to-teal-500 text-white ring-2 ring-emerald-400/50 shadow-emerald-950/40'
+                        : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700'
+                    }`}
+                    title="Aktifkan atau matikan alat pembangun jalan dua titik Pin A ⇄ B"
+                  >
+                    <Route className="w-4 h-4 text-emerald-400" />
+                    <span>Pembangun Jalan 2 Titik: {isRoadBuilderActive ? 'AKTIF' : 'OFF'}</span>
+                  </button>
+                )}
                 {onBuildTrail && (
                   <button
                     type="button"
@@ -1297,6 +1325,54 @@ export const ControlDock: React.FC<ControlDockProps> = ({
         {/* TAB 3: Place Objects */}
         {activeTab === 'place' && (
           <div className="space-y-3">
+            {/* Tombol Pembangun Jalan Dua Titik (Pin A ⇄ B) */}
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between p-3 rounded-xl bg-slate-900/90 border border-emerald-500/40 gap-3 shadow-lg">
+              <div className="flex items-center gap-2.5">
+                <div
+                  className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border ${
+                    isRoadBuilderActive
+                      ? 'bg-emerald-500/25 border-emerald-500 text-emerald-300'
+                      : 'bg-slate-800 border-slate-700 text-slate-400'
+                  }`}
+                >
+                  <Route className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-white">Pembangun Jalan 2 Titik (Pin A ⇄ B)</span>
+                    <span
+                      className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
+                        isRoadBuilderActive
+                          ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                          : 'bg-slate-800 text-slate-400'
+                      }`}
+                    >
+                      {isRoadBuilderActive ? 'AKTIF' : 'OFF'}
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-slate-400 leading-tight">
+                    Tentukan titik awal (Pin A) & titik tujuan (Pin B) di pulau, rute otomatis dibuat rapi menghindari rintangan.
+                  </p>
+                </div>
+              </div>
+
+              {onToggleRoadBuilder && (
+                <button
+                  type="button"
+                  onClick={onToggleRoadBuilder}
+                  className={`flex items-center justify-center gap-1.5 px-3.5 py-2 min-h-[40px] rounded-xl text-xs font-bold transition-all active:scale-95 cursor-pointer whitespace-nowrap shrink-0 shadow-md ${
+                    isRoadBuilderActive
+                      ? 'bg-gradient-to-r from-emerald-600 to-teal-500 text-white ring-2 ring-emerald-400/50 shadow-emerald-950/40'
+                      : 'bg-emerald-600/90 hover:bg-emerald-500 text-white'
+                  }`}
+                  title="Aktifkan atau matikan alat pembangun jalan dua titik Pin A-B"
+                >
+                  <Footprints className="w-4 h-4" />
+                  <span>{isRoadBuilderActive ? 'Tutup Pembangun Jalan' : 'Buka Pembangun Jalan (A ⇄ B)'}</span>
+                </button>
+              )}
+            </div>
+
             {/* Category Filter Chips */}
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2">
               <div className="flex items-center gap-1.5 overflow-x-auto">
@@ -1313,7 +1389,18 @@ export const ControlDock: React.FC<ControlDockProps> = ({
                   <button
                     key={c.id}
                     type="button"
-                    onClick={() => setPaletteCategory(c.id)}
+                    onClick={() => {
+                      setPaletteCategory(c.id);
+                      if (c.id === 'path') {
+                        // Switch activePaletteItem to a path item to automatically activate Road Mode
+                        const firstPath = STANDARD_PALETTE.find((i) => i.category === 'path');
+                        if (firstPath) onSelectPaletteItem(firstPath);
+                      } else if (c.id !== 'all' && activePaletteItem?.category === 'path') {
+                        // Switch activePaletteItem away from path to cleanly deactivate Road Mode
+                        const firstItem = STANDARD_PALETTE.find((i) => i.category === c.id);
+                        if (firstItem) onSelectPaletteItem(firstItem);
+                      }
+                    }}
                     className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors ${
                       paletteCategory === c.id
                         ? 'bg-slate-700 text-white'
@@ -1337,6 +1424,18 @@ export const ControlDock: React.FC<ControlDockProps> = ({
                 </button>
               )}
             </div>
+
+            {/* Contextual Road Build Guidance Banner */}
+            {paletteCategory === 'path' && (
+              <div className="flex items-center justify-between p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-xs text-emerald-300">
+                <div className="flex items-center gap-2">
+                  <Route className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <span>
+                    <strong>Mode Bangun Jalan Aktif:</strong> Pin A & B serta garis rute tampil di layar 3D. Seret pin di atas tanah untuk menentukan rute jalan, lalu klik tombol "Jalan" atau "Terapkan Jalan".
+                  </span>
+                </div>
+              </div>
+            )}
 
             {/* Procedural Scatter & Distribution Suite */}
             <div className="p-2.5 rounded-xl bg-slate-800/80 border border-slate-700/80 space-y-2">

@@ -453,6 +453,8 @@ interface Viewport3DProps {
   onSceneReady?: (scene: THREE.Scene, exportGroup: THREE.Group) => void;
   onBakeNavigationRoute?: (newHeights: Float32Array, newColors: Float32Array, newProps: PlacedObject[]) => void;
   onToast?: (msg: string) => void;
+  isRoadBuilderActive?: boolean;
+  onToggleRoadBuilder?: () => void;
 }
 
 // Module-level pre-allocated scratch objects to prevent GC in animation loop
@@ -580,6 +582,8 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   onSceneReady,
   onBakeNavigationRoute,
   onToast,
+  isRoadBuilderActive = false,
+  onToggleRoadBuilder,
 }) => {
   const mountRef = useRef<HTMLDivElement>(null);
 
@@ -662,7 +666,15 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     crossesWater: false,
     nodeCount: 2,
   });
-  const [isMinimized, setIsMinimized] = useState<boolean>(false);
+  const [isMinimized, setIsMinimized] = useState<boolean>(() => typeof window !== 'undefined' && window.innerWidth < 768);
+  const [forceRoadNavVisible, setForceRoadNavVisible] = useState<boolean>(false);
+
+  // Road Build Mode: active if user toggled road builder, or selected a path category item, or path sculpt tool
+  const isRoadModeActive =
+    isRoadBuilderActive ||
+    (activePaletteItem && activePaletteItem.category === 'path') ||
+    brushSettings.mode === 'sculpt-path' ||
+    forceRoadNavVisible;
 
   const activePinIdRef = useRef<'A' | 'B' | 'C'>('A');
   const pinAPosRef = useRef<[number, number, number]>([-18, 5, -12]);
@@ -2308,12 +2320,12 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     });
   };
 
-  // Synchronize 3D pin group visibility
+  // Synchronize 3D pin group visibility - only shown when user is building paths
   useEffect(() => {
     if (navGroupRef.current) {
-      navGroupRef.current.visible = isPinNavVisible;
+      navGroupRef.current.visible = isRoadModeActive && isPinNavVisible;
     }
-  }, [isPinNavVisible]);
+  }, [isRoadModeActive, isPinNavVisible]);
 
   const handleResetPins = () => {
     const { heights, terrainConfig } = propsRef.current;
@@ -2346,17 +2358,6 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
 
     if (propsRef.current.onToast) {
       propsRef.current.onToast('↺ Posisi Pin A, B, dan C berhasil dikembalikan ke posisi awal.');
-    }
-  };
-
-    if (controlsRef.current) {
-      controlsRef.current.target.set(0, 4, 0);
-    }
-
-    recalculateRoute();
-
-    if (propsRef.current.onToast) {
-      propsRef.current.onToast('↺ Posisi Pin A dan B berhasil dikembalikan ke posisi awal.');
     }
   };
 
@@ -2401,17 +2402,19 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     didDragRef.current = false;
     mouseDownPosRef.current = { x: e.clientX, y: e.clientY };
 
-    // Check if user touched or clicked near Pin A or Pin B
-    const touchedPin = checkPinIntersection(e.clientX, e.clientY);
-    if (touchedPin) {
-      try {
-        (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
-      } catch (_) {}
-      draggingPinRef.current = touchedPin;
-      setActivePinId(touchedPin);
-      activePinIdRef.current = touchedPin;
-      if (controlsRef.current) controlsRef.current.enabled = false;
-      return;
+    // Check if user touched or clicked near Pin A or Pin B (only in road mode)
+    if (isRoadModeActive && isPinNavVisible) {
+      const touchedPin = checkPinIntersection(e.clientX, e.clientY);
+      if (touchedPin) {
+        try {
+          (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+        } catch (_) {}
+        draggingPinRef.current = touchedPin;
+        setActivePinId(touchedPin);
+        activePinIdRef.current = touchedPin;
+        if (controlsRef.current) controlsRef.current.enabled = false;
+        return;
+      }
     }
 
     const { brushSettings } = propsRef.current;
@@ -2877,11 +2880,12 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         onPointerUp={handlePointerUp}
       />
 
-      {/* Floating Smart Pin Navigation HUD */}
-      {!isPinNavVisible ? (
-        <div className="absolute left-3 sm:left-4 top-16 sm:top-20 z-40 pointer-events-auto">
-          <button
-            onClick={() => setIsPinNavVisible(true)}
+      {/* Floating Smart Pin Navigation HUD - Only active and visible in Road Build Mode */}
+      {isRoadModeActive && (
+        !isPinNavVisible ? (
+          <div className="absolute left-3 sm:left-4 top-16 sm:top-20 z-40 pointer-events-auto">
+            <button
+              onClick={() => setIsPinNavVisible(true)}
             className="flex items-center gap-2 px-3 py-2 rounded-2xl bg-slate-950/85 backdrop-blur-md border border-slate-700/80 text-emerald-400 hover:text-emerald-300 text-xs font-semibold shadow-2xl transition-all hover:scale-105 active:scale-95 cursor-pointer"
             title="Tampilkan kembali Pin Navigasi 3D"
           >
@@ -2890,32 +2894,44 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
           </button>
         </div>
       ) : isMinimized ? (
-        <div className="absolute left-3 sm:left-4 top-16 sm:top-20 z-40 pointer-events-auto">
-          <div className="flex items-center gap-2 bg-slate-950/90 backdrop-blur-md border border-slate-700/80 rounded-2xl px-3.5 py-2 shadow-2xl text-xs">
+        <div className="absolute left-2.5 sm:left-4 top-14 sm:top-18 z-40 pointer-events-auto">
+          <div className="flex items-center gap-1.5 sm:gap-2 bg-slate-950/90 backdrop-blur-md border border-slate-700/80 rounded-2xl px-2.5 sm:px-3.5 py-1.5 shadow-2xl text-xs">
             <div className="flex items-center gap-1.5">
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
-              <span className="font-semibold text-slate-200">Pin A ⇄ B</span>
+              <span className="font-semibold text-slate-200">Pin {hasWaypointC ? 'A-C-B' : 'A ⇄ B'}</span>
             </div>
-            <span className="text-slate-400 font-mono">~{routeDetails.lengthMeters}m</span>
+            <span className="text-slate-400 font-mono text-[11px]">~{routeDetails.lengthMeters}m</span>
             {routeDetails.isDetoured ? (
-              <span className="text-[10px] bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded border border-amber-500/40">
+              <span className="hidden xs:inline-block text-[10px] bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded border border-amber-500/40">
                 Memutar ({routeDetails.avoidedCount})
               </span>
             ) : (
-              <span className="text-[10px] bg-sky-500/20 text-sky-300 px-1.5 py-0.5 rounded border border-sky-500/40">
+              <span className="hidden xs:inline-block text-[10px] bg-sky-500/20 text-sky-300 px-1.5 py-0.5 rounded border border-sky-500/40">
                 Lurus
               </span>
             )}
             <button
-              onClick={() => setIsMinimized(false)}
-              className="text-emerald-400 hover:text-emerald-300 ml-1 font-medium underline cursor-pointer"
+              type="button"
+              onClick={handleBakeRoute}
+              className="flex items-center gap-1 px-2.5 py-1 min-h-[32px] rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white font-bold text-[11px] shadow-sm active:scale-95 cursor-pointer ml-0.5"
+              title="Terapkan rute navigasi menjadi jalan paving permanen"
             >
-              Buka
+              <Footprints className="w-3.5 h-3.5" />
+              <span>Jalan</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsMinimized(false)}
+              className="p-1 min-h-[32px] min-w-[32px] flex items-center justify-center rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+              title="Buka panel navigasi lengkap"
+              aria-label="Expand Navigation Panel"
+            >
+              <ChevronDown className="w-4 h-4 text-emerald-400" />
             </button>
           </div>
         </div>
       ) : (
-        <div className="absolute left-3 sm:left-4 top-16 sm:top-20 z-40 w-[calc(100vw-24px)] max-w-[340px] sm:max-w-[365px] pointer-events-auto">
+        <div className="absolute left-2.5 sm:left-4 top-14 sm:top-18 z-40 w-[calc(100vw-20px)] max-w-[340px] sm:max-w-[365px] max-h-[72vh] overflow-y-auto overscroll-contain touch-pan-y scrollbar-thin scrollbar-thumb-slate-700 pointer-events-auto">
           <div className="bg-slate-950/90 backdrop-blur-xl border border-slate-800/90 rounded-2xl p-3 sm:p-3.5 shadow-2xl shadow-slate-950/80 flex flex-col gap-2.5 text-slate-200">
             {/* Header */}
             <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
@@ -2931,7 +2947,13 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
 
               <div className="flex items-center gap-1">
                 <button
-                  onClick={() => setIsPinNavVisible(false)}
+                  onClick={() => {
+                    setIsPinNavVisible(false);
+                    setForceRoadNavVisible(false);
+                    if (isRoadBuilderActive && onToggleRoadBuilder) {
+                      onToggleRoadBuilder();
+                    }
+                  }}
                   className="p-1 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800/80 transition-colors cursor-pointer"
                   title="Sembunyikan Pin 3D"
                 >
@@ -3138,7 +3160,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
             </div>
           </div>
         </div>
-      )}
+      ))}
     </div>
   );
 };

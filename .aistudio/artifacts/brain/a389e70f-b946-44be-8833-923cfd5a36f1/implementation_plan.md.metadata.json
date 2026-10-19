@@ -1,0 +1,6 @@
+{
+  "summary": "Rencana implementasi kontekstualisasi kontrol build jalan: menyembunyikan total seluruh HUD navigasi, pin penanda 3D (Pin A, B, C), dan garis pita rute secara default, dan hanya memunculkannya secara otomatis saat pengguna memilih kategori atau kuas Jalan Setapak (atau menekan tombol pemicu rute di palet jalan). Kanvas 3D tetap bersih bebas distraksi saat mode sculpt, vegetasi, bangunan, pencahayaan, dan export.",
+  "updatedAt": "2026-10-19T08:21:31.491102163Z",
+  "requestFeedback": true,
+  "userFacing": true
+}

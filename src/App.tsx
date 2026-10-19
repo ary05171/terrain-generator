@@ -100,6 +100,24 @@ export default function App() {
   const [fps, setFps] = useState<number>(60);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
+  // Two-Point Road Builder State (Pin A ⇄ B)
+  const [isRoadBuilderActive, setIsRoadBuilderActive] = useState<boolean>(false);
+
+  const handleToggleRoadBuilder = useCallback(() => {
+    setIsRoadBuilderActive((prev) => {
+      const next = !prev;
+      if (next) {
+        const firstPath = STANDARD_PALETTE.find((i) => i.category === 'path');
+        if (firstPath) setActivePaletteItem(firstPath);
+        setToastMessage('🛣️ Pembangun Jalan 2 Titik aktif! Geser Pin A & Pin B di pulau untuk menentukan rute.');
+      } else {
+        setToastMessage('🛣️ Pembangun Jalan ditutup. Layar kembali bersih.');
+      }
+      setTimeout(() => setToastMessage(null), 3500);
+      return next;
+    });
+  }, []);
+
   // Fullscreen Mode State & Browser API Sync
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
 
