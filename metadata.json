@@ -1,6 +1,6 @@
 {
-  "name": " terrain-generator",
-  "description": "remix from reguest5171@gmail.com ",
+  "name": "TerraForge 3D",
+  "description": "Procedural 3D stylized terrain generator and world builder with biome synthesis, multi-part building placement, GLB/OBJ import, real-time sculpting, and 3D format export (OBJ, GLTF, Three.js).",
   "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"

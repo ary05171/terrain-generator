@@ -122,3 +122,38 @@ export interface CustomAssetRecord {
   previewUrl?: string;
   vertexCount: number;
 }
+
+export interface NavigationPin {
+  id: 'A' | 'B' | 'C';
+  position: [number, number, number];
+  boundBuildingId?: string | null;
+  isSnappedToDoor?: boolean;
+}
+
+export interface AStarNavigationResult {
+  path: [number, number, number][];
+  nodes: [number, number, number][];
+  exploredNodes?: [number, number, number][];
+  totalCost: number;
+  lengthMeters: number;
+  hasSteepSlope: boolean;
+  crossesWater: boolean;
+  isDetoured: boolean;
+  avoidedCount: number;
+}
+
+export interface NavigationRouteState {
+  enabled: boolean;
+  activePinId: 'A' | 'B' | 'C';
+  pinA: NavigationPin;
+  pinB: NavigationPin;
+  pinC?: NavigationPin | null;
+  hasWaypointC: boolean;
+  waypoints: [number, number, number][];
+  aStarNodes: [number, number, number][];
+  showAStarNodes: boolean;
+  isDetoured: boolean;
+  nearbyBuilding: PlacedObject | null;
+  cameraFollowActive: boolean;
+  statusText?: string;
+}

@@ -1566,6 +1566,16 @@ export default function App() {
           sceneRef.current = scene;
           exportGroupRef.current = exportGroup;
         }}
+        onBakeNavigationRoute={(newHeights, newColors, newProps) => {
+          handleTerrainBuffersChange(newHeights, newColors);
+          if (newProps.length > 0) {
+            setPlacedObjects((prev) => [...prev, ...newProps]);
+          }
+        }}
+        onToast={(msg) => {
+          setToastMessage(msg);
+          setTimeout(() => setToastMessage(null), 3500);
+        }}
       />
 
       {/* Top Navigation & Status Bar - Hidden during Fullscreen */}

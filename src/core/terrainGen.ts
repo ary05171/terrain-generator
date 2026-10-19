@@ -1,5 +1,5 @@
 import { SimplexNoise2D, clamp, smoothstep, createPRNG } from './math';
-import { BiomeType, PathMaterial, TerrainConfig } from '../types';
+import { BiomeType, PathMaterial, TerrainConfig, AStarNavigationResult } from '../types';
 
 export interface TerrainData {
   heights: Float32Array;
@@ -1604,6 +1604,398 @@ export function generateProceduralTrails(
     propPositions,
     segments: segmentsMeta,
     trailPathPoints: rawPathPoints.map((p) => ({ x: p.x, z: p.z })),
+  };
+}
+
+export interface NavigationObstacle {
+  x: number;
+  z: number;
+  radius: number;
+  id?: string;
+}
+
+export interface AStarOptions {
+  gridStep?: number;
+  maxSlope?: number;
+  allowWater?: boolean;
+  bridges?: { x: number; z: number; radius: number }[];
+  ignoreObstacleIds?: (string | null | undefined)[];
+}
+
+/**
+ * A* search-based Pin-to-Pin navigation logic for procedural diorama terrain.
+ * Calculates optimal paths between buildings, avoids solid obstacles with clearance buffers,
+ * penalizes steep cliffs and deep water, prunes redundant nodes, and generates
+ * a smooth sequence of 3D navigation nodes adhering closely to the terrain contour.
+ */
+export function findAStarPath(
+  startPos: [number, number, number],
+  endPos: [number, number, number],
+  heights: Float32Array,
+  terrainSize: number,
+  resolution: number,
+  waterLevel: number,
+  obstacles: NavigationObstacle[] = [],
+  options?: AStarOptions
+): AStarNavigationResult {
+  const gridStep = Math.max(1.0, options?.gridStep ?? 1.8);
+  const maxSlope = options?.maxSlope ?? 0.65;
+  const ignoreIds = new Set(options?.ignoreObstacleIds?.filter(Boolean) || []);
+  const bridges = options?.bridges || [];
+
+  // Filter out any explicitly ignored obstacles (e.g. current snapped building)
+  const activeObstacles = obstacles.filter((obs) => !obs.id || !ignoreIds.has(obs.id));
+
+  // Determine search bounding area around start and end
+  const padding = Math.max(16, Math.hypot(endPos[0] - startPos[0], endPos[2] - startPos[2]) * 0.35);
+  const minX = Math.max(-terrainSize * 0.46, Math.min(startPos[0], endPos[0]) - padding);
+  const maxX = Math.min(terrainSize * 0.46, Math.max(startPos[0], endPos[0]) + padding);
+  const minZ = Math.max(-terrainSize * 0.46, Math.min(startPos[2], endPos[2]) - padding);
+  const maxZ = Math.min(terrainSize * 0.46, Math.max(startPos[2], endPos[2]) + padding);
+
+  const cols = Math.max(5, Math.ceil((maxX - minX) / gridStep));
+  const rows = Math.max(5, Math.ceil((maxZ - minZ) / gridStep));
+
+  const worldToGrid = (x: number, z: number): [number, number] => {
+    const gx = Math.max(0, Math.min(cols - 1, Math.round((x - minX) / gridStep)));
+    const gz = Math.max(0, Math.min(rows - 1, Math.round((z - minZ) / gridStep)));
+    return [gx, gz];
+  };
+
+  const gridToWorld = (gx: number, gz: number): [number, number] => {
+    return [minX + gx * gridStep, minZ + gz * gridStep];
+  };
+
+  const [startGx, startGz] = worldToGrid(startPos[0], startPos[2]);
+  const [endGx, endGz] = worldToGrid(endPos[0], endPos[2]);
+
+  // Node key generator
+  const toKey = (gx: number, gz: number) => gz * cols + gx;
+
+  // Min-Heap Priority Queue for optimal A* performance
+  interface PriorityQueueNode {
+    gx: number;
+    gz: number;
+    f: number;
+  }
+
+  class MinHeap {
+    heap: PriorityQueueNode[] = [];
+
+    push(item: PriorityQueueNode) {
+      this.heap.push(item);
+      this.bubbleUp(this.heap.length - 1);
+    }
+
+    pop(): PriorityQueueNode | undefined {
+      if (this.heap.length === 0) return undefined;
+      const top = this.heap[0];
+      const bottom = this.heap.pop()!;
+      if (this.heap.length > 0) {
+        this.heap[0] = bottom;
+        this.sinkDown(0);
+      }
+      return top;
+    }
+
+    bubbleUp(idx: number) {
+      while (idx > 0) {
+        const parentIdx = (idx - 1) >> 1;
+        if (this.heap[idx].f < this.heap[parentIdx].f) {
+          const temp = this.heap[idx];
+          this.heap[idx] = this.heap[parentIdx];
+          this.heap[parentIdx] = temp;
+          idx = parentIdx;
+        } else {
+          break;
+        }
+      }
+    }
+
+    sinkDown(idx: number) {
+      const length = this.heap.length;
+      while (true) {
+        const leftIdx = (idx << 1) + 1;
+        const rightIdx = leftIdx + 1;
+        let smallest = idx;
+
+        if (leftIdx < length && this.heap[leftIdx].f < this.heap[smallest].f) {
+          smallest = leftIdx;
+        }
+        if (rightIdx < length && this.heap[rightIdx].f < this.heap[smallest].f) {
+          smallest = rightIdx;
+        }
+        if (smallest !== idx) {
+          const temp = this.heap[idx];
+          this.heap[idx] = this.heap[smallest];
+          this.heap[smallest] = temp;
+          idx = smallest;
+        } else {
+          break;
+        }
+      }
+    }
+
+    get size() {
+      return this.heap.length;
+    }
+  }
+
+  const openSet = new MinHeap();
+  const gScores = new Map<number, number>();
+  const cameFrom = new Map<number, number>();
+  const closedSet = new Set<number>();
+  const exploredNodes: [number, number, number][] = [];
+
+  const startKey = toKey(startGx, startGz);
+  const endKey = toKey(endGx, endGz);
+
+  gScores.set(startKey, 0);
+  const startH = Math.hypot((endGx - startGx) * gridStep, (endGz - startGz) * gridStep);
+  openSet.push({ gx: startGx, gz: startGz, f: startH });
+
+  // 8-directional neighbor connectivity
+  const neighbors = [
+    { dx: 1, dz: 0, costMult: 1.0 },
+    { dx: -1, dz: 0, costMult: 1.0 },
+    { dx: 0, dz: 1, costMult: 1.0 },
+    { dx: 0, dz: -1, costMult: 1.0 },
+    { dx: 1, dz: 1, costMult: 1.414 },
+    { dx: -1, dz: 1, costMult: 1.414 },
+    { dx: 1, dz: -1, costMult: 1.414 },
+    { dx: -1, dz: -1, costMult: 1.414 },
+  ];
+
+  let foundEnd = false;
+  const maxIterations = 3500;
+  let iterations = 0;
+  let closestKey = startKey;
+  let closestDist = Infinity;
+  const avoidedObstacleIds = new Set<string>();
+
+  while (openSet.size > 0 && iterations++ < maxIterations) {
+    const current = openSet.pop()!;
+    const curKey = toKey(current.gx, current.gz);
+
+    if (closedSet.has(curKey)) continue;
+    closedSet.add(curKey);
+
+    const [curWx, curWz] = gridToWorld(current.gx, current.gz);
+    const curDist = Math.hypot(curWx - endPos[0], curWz - endPos[2]);
+    if (curDist < closestDist) {
+      closestDist = curDist;
+      closestKey = curKey;
+    }
+
+    // Collect debug explored nodes sample for UI visualization
+    if (iterations % 6 === 0 && exploredNodes.length < 96) {
+      const curH = getSampledHeightAt(curWx, curWz, heights, terrainSize, resolution);
+      exploredNodes.push([curWx, curH + 0.12, curWz]);
+    }
+
+    if (current.gx === endGx && current.gz === endGz) {
+      foundEnd = true;
+      break;
+    }
+
+    const curG = gScores.get(curKey) ?? Infinity;
+    const curHeight = getSampledHeightAt(curWx, curWz, heights, terrainSize, resolution);
+
+    for (const offset of neighbors) {
+      const nextGx = current.gx + offset.dx;
+      const nextGz = current.gz + offset.dz;
+
+      if (nextGx < 0 || nextGx >= cols || nextGz < 0 || nextGz >= rows) continue;
+
+      const nextKey = toKey(nextGx, nextGz);
+      if (closedSet.has(nextKey)) continue;
+
+      const [nextWx, nextWz] = gridToWorld(nextGx, nextGz);
+
+      // Check distance from destination/start: allow connecting right to doors
+      const distToEnd = Math.hypot(nextWx - endPos[0], nextWz - endPos[2]);
+      const distToStart = Math.hypot(nextWx - startPos[0], nextWz - startPos[2]);
+
+      let isBlocked = false;
+      let wallPenalty = 0;
+
+      for (const obs of activeObstacles) {
+        const d = Math.hypot(nextWx - obs.x, nextWz - obs.z);
+        // If close to doorway pin endpoint, allow entrance threshold
+        if (distToEnd < 2.4 || distToStart < 2.4) {
+          continue;
+        }
+
+        if (d < obs.radius + 1.2) {
+          isBlocked = true;
+          avoidedObstacleIds.add(obs.id || `${obs.x}_${obs.z}`);
+          break;
+        } else if (d < obs.radius + 2.5) {
+          wallPenalty += (obs.radius + 2.5 - d) * 3.5;
+        }
+      }
+
+      if (isBlocked) continue;
+
+      const nextHeight = getSampledHeightAt(nextWx, nextWz, heights, terrainSize, resolution);
+      const stepDist = gridStep * offset.costMult;
+      const slope = Math.abs(nextHeight - curHeight) / stepDist;
+
+      let slopePenalty = 0;
+      if (slope > maxSlope) {
+        slopePenalty = (slope - maxSlope) * 35.0;
+      }
+
+      let waterPenalty = 0;
+      if (nextHeight <= waterLevel + 0.25) {
+        const isNearBridge = bridges.some((b) => Math.hypot(b.x - nextWx, b.z - nextWz) < b.radius + 2.0);
+        if (!isNearBridge) {
+          waterPenalty = 45.0;
+        }
+      }
+
+      const moveCost = stepDist + slopePenalty + waterPenalty + wallPenalty;
+      const tentativeG = curG + moveCost;
+
+      if (tentativeG < (gScores.get(nextKey) ?? Infinity)) {
+        cameFrom.set(nextKey, curKey);
+        gScores.set(nextKey, tentativeG);
+        const h = Math.hypot(nextWx - endPos[0], nextWz - endPos[2]);
+        openSet.push({ gx: nextGx, gz: nextGz, f: tentativeG + h });
+      }
+    }
+  }
+
+  // Reconstruct path from goal (or closest reached node) back to start
+  const rawPathKeys: number[] = [];
+  let currKey: number | undefined = foundEnd ? endKey : closestKey;
+
+  while (currKey !== undefined) {
+    rawPathKeys.push(currKey);
+    if (currKey === startKey) break;
+    currKey = cameFrom.get(currKey);
+  }
+
+  rawPathKeys.reverse();
+
+  // Convert grid keys to 3D world coordinates
+  const rawNodes: [number, number, number][] = [];
+  rawNodes.push([...startPos]);
+
+  for (let i = 0; i < rawPathKeys.length; i++) {
+    const k = rawPathKeys[i];
+    const gx = k % cols;
+    const gz = Math.floor(k / cols);
+    const [wx, wz] = gridToWorld(gx, gz);
+    const wy = getSampledHeightAt(wx, wz, heights, terrainSize, resolution);
+    if (Math.hypot(wx - startPos[0], wz - startPos[2]) > 0.8 && Math.hypot(wx - endPos[0], wz - endPos[2]) > 0.8) {
+      rawNodes.push([wx, wy, wz]);
+    }
+  }
+
+  rawNodes.push([...endPos]);
+
+  // String pulling / node pruning: skip redundant intermediate nodes if line-of-sight is unobstructed
+  const prunedNodes: [number, number, number][] = [];
+  prunedNodes.push(rawNodes[0]);
+
+  let currentIdx = 0;
+  while (currentIdx < rawNodes.length - 1) {
+    let furthestVisible = currentIdx + 1;
+    for (let testIdx = currentIdx + 2; testIdx < Math.min(rawNodes.length, currentIdx + 12); testIdx++) {
+      const p1 = rawNodes[currentIdx];
+      const p2 = rawNodes[testIdx];
+      let hasCollision = false;
+
+      const dist = Math.hypot(p2[0] - p1[0], p2[2] - p1[2]);
+      const checkSteps = Math.ceil(dist / 1.5);
+      for (let s = 1; s < checkSteps; s++) {
+        const alpha = s / checkSteps;
+        const sx = p1[0] + (p2[0] - p1[0]) * alpha;
+        const sz = p1[2] + (p2[2] - p1[2]) * alpha;
+        for (const obs of activeObstacles) {
+          if (Math.hypot(sx - obs.x, sz - obs.z) < obs.radius + 1.2) {
+            hasCollision = true;
+            break;
+          }
+        }
+        if (hasCollision) break;
+      }
+
+      if (!hasCollision) {
+        furthestVisible = testIdx;
+      }
+    }
+
+    prunedNodes.push(rawNodes[furthestVisible]);
+    currentIdx = furthestVisible;
+  }
+
+  // Smooth Catmull-Rom Spline Interpolation
+  const smoothPoints: [number, number, number][] = [];
+  const totalSegments = prunedNodes.length - 1;
+  const stepsPerSegment = Math.max(8, Math.min(24, Math.floor(64 / Math.max(1, totalSegments))));
+
+  const catmullRom = (p0: number, p1: number, p2: number, p3: number, t: number) => {
+    const v0 = (p2 - p0) * 0.5;
+    const v1 = (p3 - p1) * 0.5;
+    const t2 = t * t;
+    const t3 = t * t2;
+    return (2 * p1 - 2 * p2 + v0 + v1) * t3 + (-3 * p1 + 3 * p2 - 2 * v0 - v1) * t2 + v0 * t + p1;
+  };
+
+  let hasSteepSlope = false;
+  let crossesWater = false;
+  let totalLength = 0;
+
+  for (let i = 0; i < prunedNodes.length - 1; i++) {
+    const p0 = prunedNodes[Math.max(0, i - 1)];
+    const p1 = prunedNodes[i];
+    const p2 = prunedNodes[i + 1];
+    const p3 = prunedNodes[Math.min(prunedNodes.length - 1, i + 2)];
+
+    for (let s = 0; s < stepsPerSegment; s++) {
+      const t = s / stepsPerSegment;
+      const x = catmullRom(p0[0], p1[0], p2[0], p3[0], t);
+      const z = catmullRom(p0[2], p1[2], p2[2], p3[2], t);
+      const groundY = getSampledHeightAt(x, z, heights, terrainSize, resolution);
+
+      if (groundY <= waterLevel + 0.3) crossesWater = true;
+
+      const y = Math.max(groundY + 0.08, waterLevel + 0.28);
+      smoothPoints.push([x, y, z]);
+    }
+  }
+
+  // Append exact destination point
+  const lastNode = prunedNodes[prunedNodes.length - 1];
+  const lastGround = getSampledHeightAt(lastNode[0], lastNode[2], heights, terrainSize, resolution);
+  smoothPoints.push([lastNode[0], Math.max(lastGround + 0.08, waterLevel + 0.28), lastNode[2]]);
+
+  // Calculate length and slope
+  for (let i = 1; i < smoothPoints.length; i++) {
+    const pPrev = smoothPoints[i - 1];
+    const pCurr = smoothPoints[i];
+    const segDist = Math.hypot(pCurr[0] - pPrev[0], pCurr[1] - pPrev[1], pCurr[2] - pPrev[2]);
+    totalLength += segDist;
+
+    const horizDist = Math.hypot(pCurr[0] - pPrev[0], pCurr[2] - pPrev[2]);
+    if (horizDist > 0.001) {
+      const slope = Math.abs(pCurr[1] - pPrev[1]) / horizDist;
+      if (slope > 0.45) hasSteepSlope = true;
+    }
+  }
+
+  return {
+    path: smoothPoints,
+    nodes: prunedNodes,
+    exploredNodes,
+    totalCost: gScores.get(foundEnd ? endKey : closestKey) ?? totalLength,
+    lengthMeters: Math.round(totalLength),
+    hasSteepSlope,
+    crossesWater,
+    isDetoured: avoidedObstacleIds.size > 0,
+    avoidedCount: avoidedObstacleIds.size,
   };
 }
 

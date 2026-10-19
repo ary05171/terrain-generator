@@ -1,7 +1,22 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import {
+  Route,
+  Footprints,
+  Target,
+  RotateCcw,
+  Link2,
+  Unlink,
+  Sparkles,
+  Check,
+  Navigation,
+  Eye,
+  EyeOff,
+  ChevronDown,
+  ChevronUp,
+} from 'lucide-react';
 import {
   BiomeType,
   BrushSettings,
@@ -10,6 +25,8 @@ import {
   TerrainConfig,
   TimeOfDay,
   LampSettings,
+  NavigationPin,
+  NavigationRouteState,
 } from '../types';
 import {
   BIOME_PALETTES,
@@ -22,6 +39,280 @@ import { instantiateModel } from '../core/modelFactory';
 import { getCustomModelClone } from '../core/assetIO';
 import { GraphicsPreset, PerformanceMode } from '../types';
 import { calculateDynamicAtmosphere } from '../core/timeLighting';
+import {
+  calculateSmartDetourPath,
+  findNearbyBuilding,
+  getBuildingDoorwayInfo,
+  bakeNavigationRouteToTerrain,
+} from '../core/navigationRoute';
+
+/**
+ * Creates stylish low-poly 3D Pin Beacon Marker (Pin A in warm orange, Pin B in cyan)
+ */
+export function createPinMarkerMesh(type: 'A' | 'B' | 'C'): THREE.Group {
+  const group = new THREE.Group();
+  group.name = `pin_marker_${type}`;
+
+  const primaryColor =
+    type === 'A' ? 0xf97316 : type === 'B' ? 0x06b6d4 : 0xa855f7; // A: Orange, B: Cyan, C: Purple
+
+  // 1. Ground beacon disc
+  const discGeo = new THREE.RingGeometry(0.7, 1.4, 24);
+  discGeo.rotateX(-Math.PI / 2);
+  const discMat = new THREE.MeshBasicMaterial({
+    color: primaryColor,
+    transparent: true,
+    opacity: 0.65,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  });
+  const disc = new THREE.Mesh(discGeo, discMat);
+  disc.position.y = 0.05;
+  disc.name = 'beacon_ring';
+  group.add(disc);
+
+  // 2. Inner solid dot
+  const innerDotGeo = new THREE.CircleGeometry(0.35, 16);
+  innerDotGeo.rotateX(-Math.PI / 2);
+  const innerDotMat = new THREE.MeshBasicMaterial({
+    color: primaryColor,
+    transparent: true,
+    opacity: 0.9,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  });
+  const innerDot = new THREE.Mesh(innerDotGeo, innerDotMat);
+  innerDot.position.y = 0.06;
+  group.add(innerDot);
+
+  // 3. Slender metal mast
+  const mastGeo = new THREE.CylinderGeometry(0.08, 0.12, 3.2, 8);
+  const mastMat = new THREE.MeshLambertMaterial({
+    color: 0x94a3b8,
+    flatShading: true,
+  });
+  const mast = new THREE.Mesh(mastGeo, mastMat);
+  mast.position.y = 1.6;
+  group.add(mast);
+
+  // 4. Glowing beacon sphere / head
+  const headGeo = new THREE.SphereGeometry(0.55, 12, 10);
+  const headMat = new THREE.MeshLambertMaterial({
+    color: primaryColor,
+    emissive: primaryColor,
+    emissiveIntensity: 0.8,
+    flatShading: true,
+  });
+  const head = new THREE.Mesh(headGeo, headMat);
+  head.position.y = 3.3;
+  group.add(head);
+
+  // 5. Stylized flag pennant
+  const flagGeo = new THREE.BufferGeometry();
+  const flagVerts = new Float32Array([
+    0, 3.2, 0,
+    1.3, 2.9, 0,
+    0, 2.6, 0,
+  ]);
+  flagGeo.setAttribute('position', new THREE.BufferAttribute(flagVerts, 3));
+  flagGeo.computeVertexNormals();
+  const flagMat = new THREE.MeshLambertMaterial({
+    color: primaryColor,
+    side: THREE.DoubleSide,
+    flatShading: true,
+  });
+  const flag = new THREE.Mesh(flagGeo, flagMat);
+  group.add(flag);
+
+  // 6. Raycast hit target (invisible larger sphere for easy touch/mouse picking)
+  const hitTargetGeo = new THREE.SphereGeometry(2.4, 8, 6);
+  const hitTargetMat = new THREE.MeshBasicMaterial({ visible: false });
+  const hitTarget = new THREE.Mesh(hitTargetGeo, hitTargetMat);
+  hitTarget.position.y = 2.0;
+  hitTarget.name = `pin_hit_${type}`;
+  (hitTarget as any).userData = { pinId: type };
+  group.add(hitTarget);
+
+  return group;
+}
+
+/**
+ * Creates 3D Route Ribbon mesh linking Pin A to Pin B
+ */
+export function createRouteRibbonMesh(): THREE.Mesh {
+  const geom = new THREE.BufferGeometry();
+  const mat = new THREE.MeshBasicMaterial({
+    color: 0x38bdf8,
+    transparent: true,
+    opacity: 0.9,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  });
+  const mesh = new THREE.Mesh(geom, mat);
+  mesh.name = 'NavigationRouteRibbon';
+  mesh.renderOrder = 997;
+  return mesh;
+}
+
+/**
+ * Updates 3D ribbon geometry to conform to spline waypoints with smooth gradient
+ */
+export function updateRouteRibbonGeometry(
+  mesh: THREE.Mesh,
+  points: [number, number, number][],
+  halfWidth = 0.45,
+  hasWaypointC = false
+) {
+  if (points.length < 2) {
+    mesh.visible = false;
+    return;
+  }
+
+  mesh.visible = true;
+  const count = points.length;
+  const verts = new Float32Array(count * 2 * 3);
+  const colors = new Float32Array(count * 2 * 3);
+  const indices: number[] = [];
+
+  const colorA = new THREE.Color(0xf97316); // Pin A: Orange
+  const colorB = new THREE.Color(0x06b6d4); // Pin B: Cyan
+  const colorC = new THREE.Color(0xa855f7); // Pin C: Purple
+  const curColor = new THREE.Color();
+
+  for (let i = 0; i < count; i++) {
+    const pt = points[i];
+    const alpha = i / (count - 1);
+    if (hasWaypointC) {
+      if (alpha < 0.5) {
+        curColor.lerpColors(colorA, colorC, alpha * 2);
+      } else {
+        curColor.lerpColors(colorC, colorB, (alpha - 0.5) * 2);
+      }
+    } else {
+      curColor.lerpColors(colorA, colorB, alpha);
+    }
+
+    let tanX = 0;
+    let tanZ = 0;
+    if (i < count - 1) {
+      tanX += points[i + 1][0] - pt[0];
+      tanZ += points[i + 1][2] - pt[2];
+    }
+    if (i > 0) {
+      tanX += pt[0] - points[i - 1][0];
+      tanZ += pt[2] - points[i - 1][2];
+    }
+    const len = Math.hypot(tanX, tanZ) || 1;
+    const perpX = (-tanZ / len) * halfWidth;
+    const perpZ = (tanX / len) * halfWidth;
+
+    const idxL = i * 2;
+    verts[idxL * 3] = pt[0] + perpX;
+    verts[idxL * 3 + 1] = pt[1] + 0.08;
+    verts[idxL * 3 + 2] = pt[2] + perpZ;
+    colors[idxL * 3] = curColor.r;
+    colors[idxL * 3 + 1] = curColor.g;
+    colors[idxL * 3 + 2] = curColor.b;
+
+    const idxR = i * 2 + 1;
+    verts[idxR * 3] = pt[0] - perpX;
+    verts[idxR * 3 + 1] = pt[1] + 0.08;
+    verts[idxR * 3 + 2] = pt[2] - perpZ;
+    colors[idxR * 3] = curColor.r;
+    colors[idxR * 3 + 1] = curColor.g;
+    colors[idxR * 3 + 2] = curColor.b;
+
+    if (i < count - 1) {
+      indices.push(idxL, idxR, idxL + 2);
+      indices.push(idxR, idxR + 2, idxL + 2);
+    }
+  }
+
+  const oldGeo = mesh.geometry;
+  const newGeo = new THREE.BufferGeometry();
+  newGeo.setAttribute('position', new THREE.BufferAttribute(verts, 3));
+  newGeo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  newGeo.setIndex(indices);
+  newGeo.computeVertexNormals();
+  mesh.geometry = newGeo;
+  oldGeo.dispose();
+
+  if (mesh.material instanceof THREE.MeshBasicMaterial) {
+    mesh.material.vertexColors = true;
+    mesh.material.needsUpdate = true;
+  }
+}
+
+/**
+ * Creates group for 3D A* exploration nodes and key navigation nodes
+ */
+export function createAStarNodeVisualizationGroup(): THREE.Group {
+  const group = new THREE.Group();
+  group.name = 'AStarVisualizationGroup';
+  return group;
+}
+
+/**
+ * Updates 3D visual markers representing A* grid search nodes
+ */
+export function updateAStarNodeVisualization(
+  group: THREE.Group,
+  exploredNodes: [number, number, number][],
+  keyNodes: [number, number, number][],
+  visible: boolean
+) {
+  group.visible = visible;
+  while (group.children.length > 0) {
+    const c = group.children[0];
+    group.remove(c);
+    if ((c as any).geometry) (c as any).geometry.dispose();
+  }
+
+  if (!visible) return;
+
+  // 1. Explored Grid Nodes (subtle emerald exploration field)
+  if (exploredNodes.length > 0) {
+    const exploredGeo = new THREE.BufferGeometry();
+    const posArr = new Float32Array(exploredNodes.length * 3);
+    for (let i = 0; i < exploredNodes.length; i++) {
+      posArr[i * 3] = exploredNodes[i][0];
+      posArr[i * 3 + 1] = exploredNodes[i][1] + 0.16;
+      posArr[i * 3 + 2] = exploredNodes[i][2];
+    }
+    exploredGeo.setAttribute('position', new THREE.BufferAttribute(posArr, 3));
+    const exploredMat = new THREE.PointsMaterial({
+      color: 0x10b981,
+      size: 0.75,
+      transparent: true,
+      opacity: 0.75,
+      depthWrite: false,
+    });
+    const exploredPoints = new THREE.Points(exploredGeo, exploredMat);
+    group.add(exploredPoints);
+  }
+
+  // 2. Key A* Decision Nodes along the path (brighter cyan/gold nodes)
+  if (keyNodes.length > 0) {
+    const keyGeo = new THREE.BufferGeometry();
+    const keyPos = new Float32Array(keyNodes.length * 3);
+    for (let i = 0; i < keyNodes.length; i++) {
+      keyPos[i * 3] = keyNodes[i][0];
+      keyPos[i * 3 + 1] = keyNodes[i][1] + 0.24;
+      keyPos[i * 3 + 2] = keyNodes[i][2];
+    }
+    keyGeo.setAttribute('position', new THREE.BufferAttribute(keyPos, 3));
+    const keyMat = new THREE.PointsMaterial({
+      color: 0x38bdf8,
+      size: 1.4,
+      transparent: true,
+      opacity: 0.95,
+      depthWrite: false,
+    });
+    const keyPoints = new THREE.Points(keyGeo, keyMat);
+    group.add(keyPoints);
+  }
+}
+
 
 export function normalizePreset(graphicsPreset?: GraphicsPreset, performanceMode?: PerformanceMode): GraphicsPreset {
   if (graphicsPreset === 'LOW' || performanceMode === 'LOW' || performanceMode === 'mobile') return 'LOW';
@@ -160,6 +451,8 @@ interface Viewport3DProps {
   onAddTrailPoint?: (pt: { x: number; z: number }) => void;
   onFpsUpdate?: (fps: number) => void;
   onSceneReady?: (scene: THREE.Scene, exportGroup: THREE.Group) => void;
+  onBakeNavigationRoute?: (newHeights: Float32Array, newColors: Float32Array, newProps: PlacedObject[]) => void;
+  onToast?: (msg: string) => void;
 }
 
 // Module-level pre-allocated scratch objects to prevent GC in animation loop
@@ -285,6 +578,8 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   onAddTrailPoint,
   onFpsUpdate,
   onSceneReady,
+  onBakeNavigationRoute,
+  onToast,
 }) => {
   const mountRef = useRef<HTMLDivElement>(null);
 
@@ -311,6 +606,8 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     trailPathPoints,
     onRoadCollision,
     onAddTrailPoint,
+    onBakeNavigationRoute,
+    onToast,
   });
   propsRef.current = {
     terrainConfig,
@@ -334,7 +631,56 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     trailPathPoints,
     onRoadCollision,
     onAddTrailPoint,
+    onBakeNavigationRoute,
+    onToast,
   };
+
+  // Pin Navigation State & Interactive Touch Refs
+  const [activePinId, setActivePinId] = useState<'A' | 'B' | 'C'>('A');
+  const [pinAPos, setPinAPos] = useState<[number, number, number]>(() => [-18, 5, -12]);
+  const [pinBPos, setPinBPos] = useState<[number, number, number]>(() => [18, 5, 16]);
+  const [pinCPos, setPinCPos] = useState<[number, number, number]>(() => [0, 5, 2]);
+  const [hasWaypointC, setHasWaypointC] = useState<boolean>(false);
+  const [showAStarNodes, setShowAStarNodes] = useState<boolean>(true);
+  const [pinABoundId, setPinABoundId] = useState<string | null>(null);
+  const [pinBBoundId, setPinBBoundId] = useState<string | null>(null);
+  const [cameraFollowActive, setCameraFollowActive] = useState<boolean>(true);
+  const [isPinNavVisible, setIsPinNavVisible] = useState<boolean>(true);
+  const [nearbyBuilding, setNearbyBuilding] = useState<PlacedObject | null>(null);
+  const [routeDetails, setRouteDetails] = useState<{
+    isDetoured: boolean;
+    avoidedCount: number;
+    lengthMeters: number;
+    hasSteepSlope: boolean;
+    crossesWater: boolean;
+    nodeCount: number;
+  }>({
+    isDetoured: false,
+    avoidedCount: 0,
+    lengthMeters: 0,
+    hasSteepSlope: false,
+    crossesWater: false,
+    nodeCount: 2,
+  });
+  const [isMinimized, setIsMinimized] = useState<boolean>(false);
+
+  const activePinIdRef = useRef<'A' | 'B' | 'C'>('A');
+  const pinAPosRef = useRef<[number, number, number]>([-18, 5, -12]);
+  const pinBPosRef = useRef<[number, number, number]>([18, 5, 16]);
+  const pinCPosRef = useRef<[number, number, number]>([0, 5, 2]);
+  const hasWaypointCRef = useRef<boolean>(false);
+  const showAStarNodesRef = useRef<boolean>(true);
+  const pinABoundIdRef = useRef<string | null>(null);
+  const pinBBoundIdRef = useRef<string | null>(null);
+  const cameraFollowActiveRef = useRef<boolean>(true);
+  const draggingPinRef = useRef<'A' | 'B' | 'C' | null>(null);
+  const navGroupRef = useRef<THREE.Group | null>(null);
+  const pinAGroupRef = useRef<THREE.Group | null>(null);
+  const pinBGroupRef = useRef<THREE.Group | null>(null);
+  const pinCGroupRef = useRef<THREE.Group | null>(null);
+  const aStarGroupRef = useRef<THREE.Group | null>(null);
+  const routeRibbonRef = useRef<THREE.Mesh | null>(null);
+  const currentRoutePointsRef = useRef<[number, number, number][]>([]);
 
   // Scene object refs
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -717,6 +1063,36 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     scene.add(selectionBox);
     selectionBoxRef.current = selectionBox;
 
+    // 14. Navigation Route Group (Interactive 3D Pins A & B + Route Ribbon)
+    const navGroup = new THREE.Group();
+    navGroup.name = 'NavigationRouteGroup';
+    scene.add(navGroup);
+    navGroupRef.current = navGroup;
+
+    const pinAMesh = createPinMarkerMesh('A');
+    pinAMesh.position.set(...pinAPosRef.current);
+    navGroup.add(pinAMesh);
+    pinAGroupRef.current = pinAMesh;
+
+    const pinBMesh = createPinMarkerMesh('B');
+    pinBMesh.position.set(...pinBPosRef.current);
+    navGroup.add(pinBMesh);
+    pinBGroupRef.current = pinBMesh;
+
+    const pinCMesh = createPinMarkerMesh('C');
+    pinCMesh.position.set(...pinCPosRef.current);
+    pinCMesh.visible = hasWaypointCRef.current;
+    navGroup.add(pinCMesh);
+    pinCGroupRef.current = pinCMesh;
+
+    const aStarGroup = createAStarNodeVisualizationGroup();
+    navGroup.add(aStarGroup);
+    aStarGroupRef.current = aStarGroup;
+
+    const routeRibbon = createRouteRibbonMesh();
+    navGroup.add(routeRibbon);
+    routeRibbonRef.current = routeRibbon;
+
     // Notify parent
     if (onSceneReady) {
       onSceneReady(scene, exportGroup);
@@ -947,6 +1323,46 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       const rotors = animatedRotorsRef.current;
       for (let i = 0; i < rotors.length; i++) {
         rotors[i].obj.rotation.z += delta * rotors[i].speed;
+      }
+
+      // Pulse navigation pin beacon rings
+      const beaconPulse = 1.0 + Math.sin(elapsed * 4.2) * 0.12;
+      if (pinAGroupRef.current) {
+        const ringA = pinAGroupRef.current.getObjectByName('beacon_ring');
+        if (ringA) ringA.scale.set(beaconPulse, beaconPulse, beaconPulse);
+      }
+      if (pinBGroupRef.current) {
+        const ringB = pinBGroupRef.current.getObjectByName('beacon_ring');
+        if (ringB) ringB.scale.set(beaconPulse, beaconPulse, beaconPulse);
+      }
+      if (pinCGroupRef.current && hasWaypointCRef.current) {
+        const ringC = pinCGroupRef.current.getObjectByName('beacon_ring');
+        if (ringC) ringC.scale.set(beaconPulse, beaconPulse, beaconPulse);
+      }
+
+      // Smooth Camera Follow Pin when enabled or being dragged
+      if (
+        cameraFollowActiveRef.current &&
+        (draggingPinRef.current || isMouseDownRef.current) &&
+        controlsRef.current &&
+        cameraRef.current
+      ) {
+        const activePos =
+          activePinIdRef.current === 'A'
+            ? pinAPosRef.current
+            : activePinIdRef.current === 'B'
+            ? pinBPosRef.current
+            : pinCPosRef.current;
+        const targetPos = new THREE.Vector3(activePos[0], activePos[1] + 1.2, activePos[2]);
+        controlsRef.current.target.lerp(targetPos, 0.06);
+
+        const camDist = cameraRef.current.position.distanceTo(controlsRef.current.target);
+        if (camDist > 85) {
+          cameraRef.current.position.lerp(
+            targetPos.clone().add(cameraRef.current.position.clone().sub(targetPos).normalize().multiplyScalar(60)),
+            0.04
+          );
+        }
       }
 
       renderer.render(scene, camera);
@@ -1556,11 +1972,447 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     return null;
   };
 
+  // Check if touch/click intersected Pin A, Pin B, or Pin C
+  const checkPinIntersection = (clientX: number, clientY: number): 'A' | 'B' | 'C' | null => {
+    const container = mountRef.current;
+    const camera = cameraRef.current;
+    if (!container || !camera) return null;
+
+    const rect = container.getBoundingClientRect();
+    _mouse.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+    _mouse.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+
+    _raycaster.setFromCamera(_mouse, camera);
+
+    const hitTargets: THREE.Object3D[] = [];
+    if (pinAGroupRef.current) {
+      const hA = pinAGroupRef.current.getObjectByName('pin_hit_A');
+      if (hA) hitTargets.push(hA);
+    }
+    if (pinBGroupRef.current) {
+      const hB = pinBGroupRef.current.getObjectByName('pin_hit_B');
+      if (hB) hitTargets.push(hB);
+    }
+    if (hasWaypointCRef.current && pinCGroupRef.current) {
+      const hC = pinCGroupRef.current.getObjectByName('pin_hit_C');
+      if (hC) hitTargets.push(hC);
+    }
+
+    const hits = _raycaster.intersectObjects(hitTargets, false);
+    if (hits.length > 0) {
+      const id = (hits[0].object as any).userData?.pinId;
+      if (id === 'A' || id === 'B' || id === 'C') return id;
+    }
+
+    // 3D proximity fallback
+    const pt = getTerrainIntersection(clientX, clientY);
+    if (pt) {
+      const dA = Math.hypot(pt.x - pinAPosRef.current[0], pt.z - pinAPosRef.current[2]);
+      const dB = Math.hypot(pt.x - pinBPosRef.current[0], pt.z - pinBPosRef.current[2]);
+      const dC = hasWaypointCRef.current
+        ? Math.hypot(pt.x - pinCPosRef.current[0], pt.z - pinCPosRef.current[2])
+        : Infinity;
+
+      if (dC < 4.8 && dC <= dA && dC <= dB) return 'C';
+      if (dA < 4.8 && dA <= dB) return 'A';
+      if (dB < 4.8 && dB < dA) return 'B';
+    }
+
+    return null;
+  };
+
+  const recalculateRoute = useCallback(() => {
+    const { heights, terrainConfig, placedObjects } = propsRef.current;
+    const start = pinAPosRef.current;
+    const end = pinBPosRef.current;
+    const startBound = pinABoundIdRef.current;
+    const endBound = pinBBoundIdRef.current;
+    const waypointC = hasWaypointCRef.current ? pinCPosRef.current : null;
+
+    const result = calculateSmartDetourPath(
+      start,
+      end,
+      placedObjects,
+      heights,
+      terrainConfig.size,
+      terrainConfig.resolution,
+      terrainConfig.waterLevel,
+      startBound,
+      endBound,
+      waypointC
+    );
+
+    currentRoutePointsRef.current = result.points;
+
+    if (routeRibbonRef.current) {
+      updateRouteRibbonGeometry(
+        routeRibbonRef.current,
+        result.points,
+        0.44,
+        hasWaypointCRef.current
+      );
+    }
+
+    if (aStarGroupRef.current) {
+      updateAStarNodeVisualization(
+        aStarGroupRef.current,
+        result.exploredNodes,
+        result.nodes,
+        showAStarNodesRef.current
+      );
+    }
+
+    const activePos =
+      activePinIdRef.current === 'A'
+        ? start
+        : activePinIdRef.current === 'B'
+        ? end
+        : pinCPosRef.current;
+    const nearby = findNearbyBuilding(activePos, placedObjects, 7.5);
+    setNearbyBuilding(nearby);
+
+    setRouteDetails({
+      isDetoured: result.isDetoured,
+      avoidedCount: result.avoidedCount,
+      lengthMeters: result.lengthMeters,
+      hasSteepSlope: result.hasSteepSlope,
+      crossesWater: result.crossesWater,
+      nodeCount: result.nodes.length,
+    });
+  }, []);
+
+  const updatePinPosition = (pinId: 'A' | 'B' | 'C', x: number, z: number) => {
+    const { heights, terrainConfig } = propsRef.current;
+    const maxRange = terrainConfig.size * 0.46;
+    const clampedX = Math.max(-maxRange, Math.min(maxRange, x));
+    const clampedZ = Math.max(-maxRange, Math.min(maxRange, z));
+    const groundY = getSampledHeightAt(clampedX, clampedZ, heights, terrainConfig.size, terrainConfig.resolution);
+
+    const newPos: [number, number, number] = [clampedX, groundY, clampedZ];
+
+    if (pinId === 'A') {
+      pinAPosRef.current = newPos;
+      pinABoundIdRef.current = null;
+      setPinAPos(newPos);
+      setPinABoundId(null);
+      if (pinAGroupRef.current) pinAGroupRef.current.position.set(...newPos);
+    } else if (pinId === 'B') {
+      pinBPosRef.current = newPos;
+      pinBBoundIdRef.current = null;
+      setPinBPos(newPos);
+      setPinBBoundId(null);
+      if (pinBGroupRef.current) pinBGroupRef.current.position.set(...newPos);
+    } else {
+      pinCPosRef.current = newPos;
+      setPinCPos(newPos);
+      if (pinCGroupRef.current) pinCGroupRef.current.position.set(...newPos);
+    }
+
+    recalculateRoute();
+  };
+
+  // Synchronize pin ground elevations & re-route on terrain or object changes
+  useEffect(() => {
+    const { heights, terrainConfig } = propsRef.current;
+    const yA = getSampledHeightAt(pinAPosRef.current[0], pinAPosRef.current[2], heights, terrainConfig.size, terrainConfig.resolution);
+    pinAPosRef.current = [pinAPosRef.current[0], yA, pinAPosRef.current[2]];
+    setPinAPos([...pinAPosRef.current]);
+    if (pinAGroupRef.current) pinAGroupRef.current.position.set(...pinAPosRef.current);
+
+    const yB = getSampledHeightAt(pinBPosRef.current[0], pinBPosRef.current[2], heights, terrainConfig.size, terrainConfig.resolution);
+    pinBPosRef.current = [pinBPosRef.current[0], yB, pinBPosRef.current[2]];
+    setPinBPos([...pinBPosRef.current]);
+    if (pinBGroupRef.current) pinBGroupRef.current.position.set(...pinBPosRef.current);
+
+    if (hasWaypointCRef.current) {
+      const yC = getSampledHeightAt(pinCPosRef.current[0], pinCPosRef.current[2], heights, terrainConfig.size, terrainConfig.resolution);
+      pinCPosRef.current = [pinCPosRef.current[0], yC, pinCPosRef.current[2]];
+      setPinCPos([...pinCPosRef.current]);
+      if (pinCGroupRef.current) pinCGroupRef.current.position.set(...pinCPosRef.current);
+    }
+
+    recalculateRoute();
+  }, [heights, placedObjects, terrainConfig.size, terrainConfig.resolution, terrainConfig.waterLevel, recalculateRoute]);
+
+  const handleBindDoorway = () => {
+    const activePos =
+      activePinIdRef.current === 'A'
+        ? pinAPosRef.current
+        : activePinIdRef.current === 'B'
+        ? pinBPosRef.current
+        : pinCPosRef.current;
+    const building = findNearbyBuilding(activePos, propsRef.current.placedObjects, 7.5);
+    if (!building) return;
+
+    const doorInfo = getBuildingDoorwayInfo(building);
+    if (!doorInfo) return;
+
+    const { heights, terrainConfig } = propsRef.current;
+    const targetY = getSampledHeightAt(
+      doorInfo.entrancePos[0],
+      doorInfo.entrancePos[2],
+      heights,
+      terrainConfig.size,
+      terrainConfig.resolution
+    );
+
+    const finalPos: [number, number, number] = [doorInfo.entrancePos[0], targetY, doorInfo.entrancePos[2]];
+
+    if (activePinIdRef.current === 'A') {
+      pinAPosRef.current = finalPos;
+      pinABoundIdRef.current = building.id;
+      setPinAPos(finalPos);
+      setPinABoundId(building.id);
+      if (pinAGroupRef.current) pinAGroupRef.current.position.set(...finalPos);
+    } else if (activePinIdRef.current === 'B') {
+      pinBPosRef.current = finalPos;
+      pinBBoundIdRef.current = building.id;
+      setPinBPos(finalPos);
+      setPinBBoundId(building.id);
+      if (pinBGroupRef.current) pinBGroupRef.current.position.set(...finalPos);
+    } else {
+      pinCPosRef.current = finalPos;
+      setPinCPos(finalPos);
+      if (pinCGroupRef.current) pinCGroupRef.current.position.set(...finalPos);
+    }
+
+    if (controlsRef.current) {
+      controlsRef.current.target.set(finalPos[0], finalPos[1] + 1.2, finalPos[2]);
+    }
+
+    recalculateRoute();
+
+    if (propsRef.current.onToast) {
+      propsRef.current.onToast(`🚪 Pin ${activePinIdRef.current} berhasil disambungkan tepat ke pintu depan ${building.name}!`);
+    }
+  };
+
+  const handleUnbindDoorway = () => {
+    if (activePinIdRef.current === 'A') {
+      pinABoundIdRef.current = null;
+      setPinABoundId(null);
+    } else if (activePinIdRef.current === 'B') {
+      pinBBoundIdRef.current = null;
+      setPinBBoundId(null);
+    }
+    recalculateRoute();
+    if (propsRef.current.onToast) {
+      propsRef.current.onToast(`🔓 Pin ${activePinIdRef.current} dilepas dari kaitan pintu.`);
+    }
+  };
+
+  const handleSwapPins = () => {
+    if (hasWaypointC) {
+      const nextPin: 'A' | 'B' | 'C' = activePinId === 'A' ? 'C' : activePinId === 'C' ? 'B' : 'A';
+      handleSelectPin(nextPin);
+    } else {
+      const nextPin: 'A' | 'B' | 'C' = activePinId === 'A' ? 'B' : 'A';
+      handleSelectPin(nextPin);
+    }
+  };
+
+  const handleSelectPin = (pinId: 'A' | 'B' | 'C') => {
+    setActivePinId(pinId);
+    activePinIdRef.current = pinId;
+    const targetPos =
+      pinId === 'A'
+        ? pinAPosRef.current
+        : pinId === 'B'
+        ? pinBPosRef.current
+        : pinCPosRef.current;
+    if (controlsRef.current) {
+      controlsRef.current.target.set(targetPos[0], targetPos[1] + 1.2, targetPos[2]);
+    }
+    const nearby = findNearbyBuilding(targetPos, propsRef.current.placedObjects, 7.5);
+    setNearbyBuilding(nearby);
+  };
+
+  const focusCameraOnPin = useCallback((pinId: 'A' | 'B' | 'C', zoomCloser: boolean = false) => {
+    const pos =
+      pinId === 'A'
+        ? pinAPosRef.current
+        : pinId === 'B'
+        ? pinBPosRef.current
+        : pinCPosRef.current;
+    if (!controlsRef.current || !cameraRef.current) return;
+
+    const targetPos = new THREE.Vector3(pos[0], pos[1] + 1.2, pos[2]);
+    controlsRef.current.target.copy(targetPos);
+
+    if (zoomCloser) {
+      const cam = cameraRef.current;
+      const forward = new THREE.Vector3().subVectors(cam.position, targetPos).normalize();
+      cam.position.copy(targetPos).add(forward.multiplyScalar(32));
+    }
+    controlsRef.current.update();
+  }, []);
+
+  const handleToggleWaypointC = () => {
+    setHasWaypointC((prev) => {
+      const next = !prev;
+      hasWaypointCRef.current = next;
+      if (pinCGroupRef.current) {
+        pinCGroupRef.current.visible = next;
+      }
+      if (next) {
+        const midX = (pinAPosRef.current[0] + pinBPosRef.current[0]) * 0.5 + 4;
+        const midZ = (pinAPosRef.current[2] + pinBPosRef.current[2]) * 0.5 - 4;
+        const midY = getSampledHeightAt(
+          midX,
+          midZ,
+          propsRef.current.heights,
+          propsRef.current.terrainConfig.size,
+          propsRef.current.terrainConfig.resolution
+        );
+        const newCPos: [number, number, number] = [midX, midY, midZ];
+        pinCPosRef.current = newCPos;
+        setPinCPos(newCPos);
+        if (pinCGroupRef.current) {
+          pinCGroupRef.current.position.set(...newCPos);
+        }
+        setActivePinId('C');
+        activePinIdRef.current = 'C';
+        propsRef.current.onToast?.('📍 Titik Singgah Pin C ditambahkan! Rute A* menghubungkan A → C → B.');
+      } else {
+        if (activePinIdRef.current === 'C') {
+          setActivePinId('A');
+          activePinIdRef.current = 'A';
+        }
+        propsRef.current.onToast?.('✕ Titik Singgah Pin C dihapus. Rute A* kembali langsung A → B.');
+      }
+      setTimeout(recalculateRoute, 10);
+      return next;
+    });
+  };
+
+  const handleToggleAStarNodes = () => {
+    setShowAStarNodes((prev) => {
+      const next = !prev;
+      showAStarNodesRef.current = next;
+      if (aStarGroupRef.current) {
+        aStarGroupRef.current.visible = next;
+      }
+      recalculateRoute();
+      return next;
+    });
+  };
+
+  const toggleCameraFollow = () => {
+    setCameraFollowActive((prev) => {
+      const next = !prev;
+      cameraFollowActiveRef.current = next;
+      if (next) {
+        focusCameraOnPin(activePinIdRef.current, false);
+      }
+      return next;
+    });
+  };
+
+  // Synchronize 3D pin group visibility
+  useEffect(() => {
+    if (navGroupRef.current) {
+      navGroupRef.current.visible = isPinNavVisible;
+    }
+  }, [isPinNavVisible]);
+
+  const handleResetPins = () => {
+    const { heights, terrainConfig } = propsRef.current;
+    const half = terrainConfig.size * 0.28;
+    const yA = getSampledHeightAt(-half, -half, heights, terrainConfig.size, terrainConfig.resolution);
+    const yB = getSampledHeightAt(half, half, heights, terrainConfig.size, terrainConfig.resolution);
+    const yC = getSampledHeightAt(0, 0, heights, terrainConfig.size, terrainConfig.resolution);
+
+    pinAPosRef.current = [-half, yA, -half];
+    pinBPosRef.current = [half, yB, half];
+    pinCPosRef.current = [0, yC, 0];
+    pinABoundIdRef.current = null;
+    pinBBoundIdRef.current = null;
+
+    setPinAPos([-half, yA, -half]);
+    setPinBPos([half, yB, half]);
+    setPinCPos([0, yC, 0]);
+    setPinABoundId(null);
+    setPinBBoundId(null);
+
+    if (pinAGroupRef.current) pinAGroupRef.current.position.set(-half, yA, -half);
+    if (pinBGroupRef.current) pinBGroupRef.current.position.set(half, yB, half);
+    if (pinCGroupRef.current) pinCGroupRef.current.position.set(0, yC, 0);
+
+    if (controlsRef.current) {
+      controlsRef.current.target.set(0, 4, 0);
+    }
+
+    recalculateRoute();
+
+    if (propsRef.current.onToast) {
+      propsRef.current.onToast('↺ Posisi Pin A, B, dan C berhasil dikembalikan ke posisi awal.');
+    }
+  };
+
+    if (controlsRef.current) {
+      controlsRef.current.target.set(0, 4, 0);
+    }
+
+    recalculateRoute();
+
+    if (propsRef.current.onToast) {
+      propsRef.current.onToast('↺ Posisi Pin A dan B berhasil dikembalikan ke posisi awal.');
+    }
+  };
+
+  const handleBakeRoute = () => {
+    if (currentRoutePointsRef.current.length < 2) return;
+    const {
+      heights,
+      colors,
+      terrainConfig,
+      placedObjects,
+      onBakeNavigationRoute,
+      onTerrainBuffersChange,
+      onObjectPlaced,
+      onToast,
+    } = propsRef.current;
+
+    const result = bakeNavigationRouteToTerrain(
+      currentRoutePointsRef.current,
+      heights,
+      colors,
+      terrainConfig,
+      placedObjects
+    );
+
+    if (onBakeNavigationRoute) {
+      onBakeNavigationRoute(result.newHeights, result.newColors, result.newProps);
+    } else {
+      if (onTerrainBuffersChange) {
+        onTerrainBuffersChange(result.newHeights, result.newColors);
+      }
+      result.newProps.forEach((p) => onObjectPlaced?.(p));
+    }
+
+    if (onToast) {
+      onToast('🚶‍♂️ Jalur Pin A ⇄ B berhasil diterapkan menjadi jalan setapak permanen!');
+    }
+  };
+
   const handlePointerDown = (e: React.PointerEvent) => {
-    if (e.button !== 0) return; // only left click
+    if (e.button !== 0) return; // only left click / primary touch
     isMouseDownRef.current = true;
     didDragRef.current = false;
     mouseDownPosRef.current = { x: e.clientX, y: e.clientY };
+
+    // Check if user touched or clicked near Pin A or Pin B
+    const touchedPin = checkPinIntersection(e.clientX, e.clientY);
+    if (touchedPin) {
+      try {
+        (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+      } catch (_) {}
+      draggingPinRef.current = touchedPin;
+      setActivePinId(touchedPin);
+      activePinIdRef.current = touchedPin;
+      if (controlsRef.current) controlsRef.current.enabled = false;
+      return;
+    }
 
     const { brushSettings } = propsRef.current;
     if (brushSettings.mode.startsWith('sculpt')) {
@@ -1705,6 +2557,30 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       didDragRef.current = true;
     }
 
+    // Direct touch-drag for Navigation Pins A and B
+    if (draggingPinRef.current) {
+      const pinId = draggingPinRef.current;
+      const pt = getTerrainIntersection(e.clientX, e.clientY);
+      if (pt) {
+        updatePinPosition(pinId, pt.x, pt.z);
+
+        // Dynamic Camera Follow & Auto-Zoom if Pin is moving or far away
+        if (cameraFollowActiveRef.current && controlsRef.current && cameraRef.current) {
+          const target = controlsRef.current.target;
+          target.lerp(new THREE.Vector3(pt.x, pt.y + 1.2, pt.z), 0.20);
+          controlsRef.current.update();
+
+          const cam = cameraRef.current;
+          const dist = cam.position.distanceTo(target);
+          if (dist > 52) {
+            const forward = new THREE.Vector3().subVectors(cam.position, target).normalize();
+            cam.position.lerp(target.clone().add(forward.multiplyScalar(36)), 0.14);
+          }
+        }
+      }
+      return;
+    }
+
     const { brushSettings, activePaletteItem } = propsRef.current;
 
     // Skip raycast when just navigating in select mode
@@ -1759,6 +2635,19 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
 
   const handlePointerUp = (e: React.PointerEvent) => {
     isMouseDownRef.current = false;
+
+    try {
+      if ((e.target as HTMLElement).hasPointerCapture?.(e.pointerId)) {
+        (e.target as HTMLElement).releasePointerCapture?.(e.pointerId);
+      }
+    } catch (_) {}
+
+    if (draggingPinRef.current) {
+      draggingPinRef.current = null;
+      if (controlsRef.current) controlsRef.current.enabled = true;
+      return;
+    }
+
     if (controlsRef.current) controlsRef.current.enabled = true;
 
     // Only trigger placement or selection if user simply clicked (didn't drag camera)
@@ -1971,15 +2860,285 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     }
   };
 
+  const isBoundToCurrent =
+    nearbyBuilding &&
+    (activePinId === 'A' ? pinABoundId === nearbyBuilding.id : pinBBoundId === nearbyBuilding.id);
+
   return (
-    <div
-      ref={mountRef}
-      role="region"
-      aria-label="3D Terrain and World Viewport"
-      className="absolute inset-0 w-full h-full overflow-hidden select-none cursor-grab active:cursor-grabbing"
-      onPointerDown={handlePointerDown}
-      onPointerMove={handlePointerMove}
-      onPointerUp={handlePointerUp}
-    />
+    <div className="absolute inset-0 w-full h-full overflow-hidden select-none pointer-events-none">
+      {/* 3D WebGL Canvas Layer */}
+      <div
+        ref={mountRef}
+        role="region"
+        aria-label="3D Terrain and World Viewport"
+        className="absolute inset-0 w-full h-full overflow-hidden select-none cursor-grab active:cursor-grabbing pointer-events-auto"
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+      />
+
+      {/* Floating Smart Pin Navigation HUD */}
+      {!isPinNavVisible ? (
+        <div className="absolute left-3 sm:left-4 top-16 sm:top-20 z-40 pointer-events-auto">
+          <button
+            onClick={() => setIsPinNavVisible(true)}
+            className="flex items-center gap-2 px-3 py-2 rounded-2xl bg-slate-950/85 backdrop-blur-md border border-slate-700/80 text-emerald-400 hover:text-emerald-300 text-xs font-semibold shadow-2xl transition-all hover:scale-105 active:scale-95 cursor-pointer"
+            title="Tampilkan kembali Pin Navigasi 3D"
+          >
+            <Route className="w-4 h-4 text-emerald-400" />
+            <span>Tampilkan Pin Jalur</span>
+          </button>
+        </div>
+      ) : isMinimized ? (
+        <div className="absolute left-3 sm:left-4 top-16 sm:top-20 z-40 pointer-events-auto">
+          <div className="flex items-center gap-2 bg-slate-950/90 backdrop-blur-md border border-slate-700/80 rounded-2xl px-3.5 py-2 shadow-2xl text-xs">
+            <div className="flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
+              <span className="font-semibold text-slate-200">Pin A ⇄ B</span>
+            </div>
+            <span className="text-slate-400 font-mono">~{routeDetails.lengthMeters}m</span>
+            {routeDetails.isDetoured ? (
+              <span className="text-[10px] bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded border border-amber-500/40">
+                Memutar ({routeDetails.avoidedCount})
+              </span>
+            ) : (
+              <span className="text-[10px] bg-sky-500/20 text-sky-300 px-1.5 py-0.5 rounded border border-sky-500/40">
+                Lurus
+              </span>
+            )}
+            <button
+              onClick={() => setIsMinimized(false)}
+              className="text-emerald-400 hover:text-emerald-300 ml-1 font-medium underline cursor-pointer"
+            >
+              Buka
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="absolute left-3 sm:left-4 top-16 sm:top-20 z-40 w-[calc(100vw-24px)] max-w-[340px] sm:max-w-[365px] pointer-events-auto">
+          <div className="bg-slate-950/90 backdrop-blur-xl border border-slate-800/90 rounded-2xl p-3 sm:p-3.5 shadow-2xl shadow-slate-950/80 flex flex-col gap-2.5 text-slate-200">
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-lg bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400">
+                  <Route className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-xs font-bold text-white tracking-wide">Navigasi Cerdas Pin A ⇄ B</h3>
+                  <p className="text-[10px] text-slate-400 leading-tight">Penghindaran Rintangan & Bind Pintu</p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setIsPinNavVisible(false)}
+                  className="p-1 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800/80 transition-colors cursor-pointer"
+                  title="Sembunyikan Pin 3D"
+                >
+                  <EyeOff className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  onClick={() => setIsMinimized(true)}
+                  className="p-1 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800/80 transition-colors cursor-pointer"
+                  title="Kecilkan panel"
+                >
+                  <ChevronUp className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            {/* Pin Selector Tabs */}
+            <div className="grid grid-cols-2 gap-1.5">
+              <button
+                type="button"
+                onClick={() => handleSelectPin('A')}
+                className={`p-2 rounded-xl text-left border transition-all cursor-pointer ${
+                  activePinId === 'A'
+                    ? 'bg-amber-500/15 border-amber-500/70 shadow-sm'
+                    : 'bg-slate-900/60 border-slate-800/80 hover:bg-slate-800/60'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-0.5">
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-full bg-amber-500 shadow-sm shadow-amber-500/50" />
+                    <span className="text-xs font-bold text-white">Pin A (Mulai)</span>
+                  </div>
+                  {pinABoundId && (
+                    <span className="text-[9px] bg-emerald-500/25 text-emerald-300 px-1 py-0.2 rounded border border-emerald-500/40">
+                      Pintu
+                    </span>
+                  )}
+                </div>
+                <div className="text-[10px] text-slate-400 font-mono">
+                  [{pinAPos[0].toFixed(0)}, {pinAPos[2].toFixed(0)}]
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleSelectPin('B')}
+                className={`p-2 rounded-xl text-left border transition-all cursor-pointer ${
+                  activePinId === 'B'
+                    ? 'bg-cyan-500/15 border-cyan-500/70 shadow-sm'
+                    : 'bg-slate-900/60 border-slate-800/80 hover:bg-slate-800/60'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-0.5">
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 shadow-sm shadow-cyan-400/50" />
+                    <span className="text-xs font-bold text-white">Pin B (Tujuan)</span>
+                  </div>
+                  {pinBBoundId && (
+                    <span className="text-[9px] bg-emerald-500/25 text-emerald-300 px-1 py-0.2 rounded border border-emerald-500/40">
+                      Pintu
+                    </span>
+                  )}
+                </div>
+                <div className="text-[10px] text-slate-400 font-mono">
+                  [{pinBPos[0].toFixed(0)}, {pinBPos[2].toFixed(0)}]
+                </div>
+              </button>
+            </div>
+
+            {/* Quick Switch Pin Button */}
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={handleSwapPins}
+                className="text-[11px] text-slate-400 hover:text-white flex items-center gap-1 hover:underline cursor-pointer transition-colors"
+              >
+                <span>⇄ Ganti Pin Aktif ({activePinId === 'A' ? 'Pilih B' : 'Pilih A'})</span>
+              </button>
+            </div>
+
+            {/* Interactive Door Binding Section (Active when near building) */}
+            {nearbyBuilding && (
+              <div
+                className={`p-2.5 rounded-xl border transition-all ${
+                  isBoundToCurrent
+                    ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-200'
+                    : 'bg-amber-500/15 border-amber-500/40 text-amber-200'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-1 mb-1">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-sm">{isBoundToCurrent ? '🚪' : '📍'}</span>
+                    <span className="text-xs font-bold text-white truncate max-w-[170px]">
+                      {nearbyBuilding.name}
+                    </span>
+                  </div>
+                  <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-slate-900/70 text-slate-300">
+                    Pin {activePinId}
+                  </span>
+                </div>
+
+                <p className="text-[10.5px] text-slate-300 leading-tight mb-2">
+                  {isBoundToCurrent
+                    ? `Pin ${activePinId} terkunci di ambang pintu depan. Rute akan otomatis memutar bila datang dari sisi belakang.`
+                    : `Pin ${activePinId} dekat bangunan! Sambungkan ke pintu depan agar rute otomatis menuju pintu.`}
+                </p>
+
+                {isBoundToCurrent ? (
+                  <button
+                    type="button"
+                    onClick={handleUnbindDoorway}
+                    className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-rose-900/60 border border-slate-700 hover:border-rose-700/60 text-rose-300 hover:text-white text-xs font-semibold transition-all cursor-pointer shadow-sm active:scale-95"
+                  >
+                    <Unlink className="w-3.5 h-3.5" />
+                    <span>Lepas Kaitan Pintu</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleBindDoorway}
+                    className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 active:scale-95 text-slate-950 text-xs font-bold transition-all cursor-pointer shadow-lg shadow-amber-500/25"
+                  >
+                    <Link2 className="w-4 h-4 text-slate-950 stroke-[2.5]" />
+                    <span>🚪 Sambung ke Pintu Depan</span>
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Smart Detour Status Box */}
+            <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-2.5 flex flex-col gap-1 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400 font-medium">Panjang Rute</span>
+                <span className="font-mono text-slate-200 font-bold">~{routeDetails.lengthMeters} m</span>
+              </div>
+              {routeDetails.isDetoured ? (
+                <div className="flex items-start gap-1.5 text-emerald-400 text-[11px] leading-tight mt-0.5">
+                  <Sparkles className="w-3.5 h-3.5 shrink-0 mt-0.5 text-emerald-400" />
+                  <span>
+                    <strong>Penghindaran Otomatis Aktif:</strong> Jalur melengkung mengitari{' '}
+                    {routeDetails.avoidedCount} rintangan secara mulus.
+                  </span>
+                </div>
+              ) : (
+                <div className="flex items-start gap-1.5 text-sky-400 text-[11px] leading-tight mt-0.5">
+                  <Check className="w-3.5 h-3.5 shrink-0 mt-0.5 text-sky-400" />
+                  <span>
+                    <strong>Jalur Bersih:</strong> Lurus bebas hambatan tanpa menabrak bangunan.
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* Camera Tracking & Touch Controls */}
+            <div className="flex items-center justify-between gap-2 p-2 rounded-xl bg-slate-900/60 border border-slate-800/80">
+              <button
+                type="button"
+                onClick={toggleCameraFollow}
+                className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+                  cameraFollowActive
+                    ? 'bg-emerald-500/25 text-emerald-300 border border-emerald-500/50'
+                    : 'bg-slate-800 text-slate-400 border border-slate-700 hover:text-slate-200'
+                }`}
+                title="Kamera otomatis mengikuti posisi Pin aktif saat digeser"
+              >
+                <Target className="w-3.5 h-3.5" />
+                <span>Kamera Ikuti Pin: {cameraFollowActive ? 'ON' : 'OFF'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => focusCameraOnPin(activePinId, true)}
+                className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium border border-slate-700 transition-all cursor-pointer flex items-center gap-1 active:scale-95"
+                title="Pusatkan dan dekatkan kamera ke Pin aktif"
+              >
+                <span>Dekatkan</span>
+              </button>
+            </div>
+
+            <div className="text-[10px] text-slate-400 leading-snug px-0.5">
+              💡 <em>Sentuh & seret Pin A atau B langsung di layar 3D tanpa tombol analog. Kamera otomatis mengikuti & mendekat jika area menjauh.</em>
+            </div>
+
+            {/* Action Buttons Row */}
+            <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-800/80">
+              <button
+                type="button"
+                onClick={handleResetPins}
+                className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-xs font-semibold transition-all active:scale-95 cursor-pointer"
+                title="Kembalikan Pin A dan B ke posisi default di kedua ujung pulau"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Reset Pin</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleBakeRoute}
+                className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white shadow-lg shadow-emerald-950/40 text-xs font-bold transition-all active:scale-95 cursor-pointer"
+                title="Cetak rute ini menjadi jalan setapak paving permanen dan pasang jembatan kayu jika melintasi air"
+              >
+                <Footprints className="w-3.5 h-3.5" />
+                <span>Terapkan Jalan</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
   );
 };
