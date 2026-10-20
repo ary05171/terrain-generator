@@ -175,13 +175,13 @@ export const TopBar: React.FC<TopBarProps> = ({
       </div>
 
       {/* Cluster Kanan: Jalan 2 Titik, Jam & Waktu, Grafis/Resolusi, Fullscreen, Zen View */}
-      <div className="flex items-center gap-1.5 bg-slate-950/90 backdrop-blur-md border border-slate-800/80 rounded-2xl p-1 pointer-events-auto shadow-2xl">
+      <div className="flex items-center gap-1 sm:gap-1.5 bg-slate-950/90 backdrop-blur-md border border-slate-800/80 rounded-2xl p-1 pointer-events-auto shadow-2xl shrink-0">
         {/* Tombol Pembangun Jalan Dua Titik */}
         {onToggleRoadBuilder && (
           <button
             type="button"
             onClick={onToggleRoadBuilder}
-            className={`flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 min-h-[38px] rounded-xl border transition-all active:scale-95 shadow-sm cursor-pointer ${
+            className={`flex items-center gap-1 sm:gap-1.5 text-xs font-semibold px-2 sm:px-2.5 py-1.5 min-h-[36px] sm:min-h-[38px] rounded-xl border transition-all active:scale-95 shadow-sm cursor-pointer ${
               isRoadBuilderActive
                 ? 'bg-gradient-to-r from-emerald-600 to-teal-500 text-white border-emerald-400 ring-2 ring-emerald-500/50 shadow-emerald-950/40'
                 : 'bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border-slate-700/60'
@@ -189,10 +189,11 @@ export const TopBar: React.FC<TopBarProps> = ({
             title={isRoadBuilderActive ? 'Tutup Pembangun Jalan Dua Titik (Pin A ⇄ B)' : 'Aktifkan Pembangun Jalan Dua Titik (Pin A ⇄ B)'}
             aria-label="Pembangun Jalan 2 Titik"
           >
-            <Route className="w-3.5 h-3.5 text-emerald-400" />
-            <span className="font-bold whitespace-nowrap">Jalan 2 Titik</span>
+            <Route className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+            <span className="hidden sm:inline font-bold whitespace-nowrap">Jalan 2 Titik</span>
+            <span className="sm:hidden font-bold whitespace-nowrap text-[11px]">Jalan</span>
             <span
-              className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${
+              className={`text-[9px] font-bold px-1 sm:px-1.5 py-0.2 rounded-full ${
                 isRoadBuilderActive ? 'bg-white/20 text-white' : 'bg-slate-800 text-slate-400'
               }`}
             >
@@ -205,18 +206,18 @@ export const TopBar: React.FC<TopBarProps> = ({
         <button
           type="button"
           onClick={onOpenLightingTab}
-          className="flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 min-h-[38px] rounded-xl bg-slate-900/90 hover:bg-slate-800 text-slate-200 hover:text-white border border-amber-500/30 hover:border-amber-400/60 transition-all shadow-sm active:scale-95"
+          className="flex items-center gap-1 sm:gap-1.5 text-xs font-semibold px-2 sm:px-2.5 py-1.5 min-h-[36px] sm:min-h-[38px] rounded-xl bg-slate-900/90 hover:bg-slate-800 text-slate-200 hover:text-white border border-amber-500/30 hover:border-amber-400/60 transition-all shadow-sm active:scale-95 shrink-0"
           title="Buka Tab Waktu & Cahaya (Siklus 24 Jam & Lampu)"
         >
-          <Clock className="w-3.5 h-3.5 text-amber-400" />
-          <span className="font-mono text-amber-300 font-bold">{timeString}</span>
+          <Clock className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+          <span className="font-mono text-amber-300 font-bold text-[11px] sm:text-xs">{timeString}</span>
         </button>
 
         {/* Pengatur Grafis Lengkap & Resolusi */}
         <button
           type="button"
           onClick={onOpenGraphicsSettings}
-          className="hidden sm:flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 min-h-[38px] rounded-xl bg-slate-900/90 hover:bg-slate-800 text-slate-200 hover:text-white border border-slate-700/60 hover:border-emerald-500/50 transition-all shadow-sm active:scale-95"
+          className="hidden md:flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 min-h-[38px] rounded-xl bg-slate-900/90 hover:bg-slate-800 text-slate-200 hover:text-white border border-slate-700/60 hover:border-emerald-500/50 transition-all shadow-sm active:scale-95"
           title={`Pengatur Grafis: ${effectivePreset} (${renderScale.toFixed(2)}x). Klik untuk ubah resolusi dan preset.`}
         >
           <Sliders className="w-3.5 h-3.5 text-emerald-400" />
@@ -229,7 +230,7 @@ export const TopBar: React.FC<TopBarProps> = ({
           <button
             type="button"
             onClick={onToggleFullscreen}
-            className="flex items-center justify-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 min-h-[38px] min-w-[38px] rounded-xl bg-slate-900/90 hover:bg-emerald-950/40 text-slate-200 hover:text-white border border-slate-700/60 hover:border-emerald-500/60 transition-all shadow-sm active:scale-95"
+            className="flex items-center justify-center gap-1 text-xs font-semibold px-2 sm:px-2.5 py-1.5 min-h-[36px] min-w-[36px] sm:min-h-[38px] sm:min-w-[38px] rounded-xl bg-slate-900/90 hover:bg-emerald-950/40 text-slate-200 hover:text-white border border-slate-700/60 hover:border-emerald-500/60 transition-all shadow-sm active:scale-95 shrink-0"
             title={isFullscreen ? 'Keluar Mode Layar Penuh (Esc atau F)' : 'Mode Layar Penuh Fullscreen (F)'}
             aria-label="Toggle Fullscreen"
           >
@@ -238,7 +239,7 @@ export const TopBar: React.FC<TopBarProps> = ({
             ) : (
               <Maximize2 className="w-4 h-4 text-emerald-400" />
             )}
-            <span className="hidden md:inline">{isFullscreen ? 'Keluar' : 'Fullscreen'}</span>
+            <span className="hidden lg:inline">{isFullscreen ? 'Keluar' : 'Fullscreen'}</span>
           </button>
         )}
 
@@ -246,12 +247,12 @@ export const TopBar: React.FC<TopBarProps> = ({
         <button
           type="button"
           onClick={onToggleDock}
-          className="flex items-center justify-center gap-1 text-xs font-medium px-2 py-1.5 min-h-[38px] min-w-[38px] rounded-xl text-slate-400 hover:text-white hover:bg-slate-900 transition-colors active:scale-95"
+          className="flex items-center justify-center gap-1 text-xs font-medium px-2 py-1.5 min-h-[36px] min-w-[36px] sm:min-h-[38px] sm:min-w-[38px] rounded-xl text-slate-400 hover:text-white hover:bg-slate-900 transition-colors active:scale-95 shrink-0"
           title={isDockCollapsed ? 'Buka Menu Dock Bawah (H)' : 'Sembunyikan Menu Dock Bawah (H)'}
           aria-label="Toggle Dock UI"
         >
           <Eye className="w-4 h-4 text-emerald-400" />
-          <span className="hidden lg:inline">{isDockCollapsed ? 'Tampil' : 'Zen'}</span>
+          <span className="hidden xl:inline">{isDockCollapsed ? 'Tampil' : 'Zen'}</span>
         </button>
       </div>
     </header>

@@ -167,3 +167,24 @@ test('generateProceduralTrails generates scenic connected path segments on terra
   assert.ok(Array.isArray(result.propPositions), 'Should return prop positions array');
 });
 
+test('JSZip packages 3D model metadata and README into valid zip archive', async () => {
+  const JSZip = (await import('jszip')).default;
+  const zip = new JSZip();
+  zip.file('model.obj', 'v 0.0 0.0 0.0\nv 1.0 1.0 1.0\nf 1 2 3\n');
+  zip.file('metadata.json', JSON.stringify({ generator: 'TerraForge 3D', biome: 'archipelago' }));
+  zip.file('README.txt', 'Panduan impor TerraForge 3D');
+
+  const zipBuffer = await zip.generateAsync({ type: 'nodebuffer' });
+  assert.ok(zipBuffer.length > 50, 'Generated zip buffer should contain valid bytes');
+
+  // Verify unzip content
+  const loadedZip = await JSZip.loadAsync(zipBuffer);
+  assert.ok(loadedZip.file('model.obj'), 'model.obj should exist in zip');
+  assert.ok(loadedZip.file('metadata.json'), 'metadata.json should exist in zip');
+  assert.ok(loadedZip.file('README.txt'), 'README.txt should exist in zip');
+
+  const metaContent = JSON.parse(await loadedZip.file('metadata.json')!.async('string'));
+  assert.equal(metaContent.generator, 'TerraForge 3D');
+});
+
+

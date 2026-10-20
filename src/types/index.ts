@@ -39,9 +39,21 @@ export interface TerrainConfig {
   trailWidth?: number;    // trail width radius (e.g. 1.0 to 5.5, default 2.2)
   trailEdgeDecoration?: boolean; // Dekorasi tepian: batu pembatas paving + rumput bunga
   autoInstallStairsAndBridges?: boolean; // Smart path builder: auto-place stairs on steep slopes & bridges over water
+  soilBrightness?: number; // Kecerahan tanah (0.80 - 1.50, default 1.15)
+  soilWarmth?: number;     // Kehangatan / saturasi tanah alami (0.85 - 1.35, default 1.10)
+  soilTextureGrain?: number; // Intensitas tekstur mikro-noise butiran alami (0.00 - 1.00, default 0.65)
+  windSettings?: WindSettings;
 }
 
-export type ObjectCategory = 'building' | 'foliage' | 'prop' | 'cyber' | 'fantasy' | 'custom' | 'path';
+export type FarmPlotStage = 'dry' | 'wet' | 'sprout' | 'mature';
+
+export interface WindSettings {
+  speed: number;    // 0.0 to 3.0, default 1.0
+  strength: number; // 0.0 to 1.0, default 0.65
+  enabled: boolean; // default true
+}
+
+export type ObjectCategory = 'building' | 'foliage' | 'farm' | 'prop' | 'cyber' | 'fantasy' | 'custom' | 'path';
 
 export interface PlacedObject {
   id: string;
@@ -53,6 +65,7 @@ export interface PlacedObject {
   scale: [number, number, number];
   customModelKey?: string;
   tint?: string;
+  farmStage?: FarmPlotStage;
 }
 
 export interface PaletteItem {

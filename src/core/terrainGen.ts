@@ -22,12 +22,12 @@ export const BIOME_PALETTES: Record<BiomeType, {
     fogColor: '#bae6fd',
     skyColor: '#38bdf8',
     stops: [
-      [0.0, 0.08, 0.28, 0.48], // deep ocean floor (rich navy ocean)
-      [0.15, 0.76, 0.64, 0.38], // warm golden sand beach at shoreline
-      [0.26, 0.24, 0.58, 0.22], // lush rich green meadow grass (rumput hijau asri)
-      [0.52, 0.16, 0.46, 0.16], // rich tropical foliage & fertile soil (tanah subur & vegetasi)
-      [0.76, 0.32, 0.38, 0.28], // highland slopes & mossy stone (lereng batu berlumut)
-      [0.95, 0.20, 0.44, 0.22], // emerald mountain peak (puncak bukit hijau asri)
+      [0.0, 0.10, 0.32, 0.52], // deep ocean floor (clear turquoise-navy)
+      [0.15, 0.94, 0.82, 0.52], // sunlit warm golden beach sand
+      [0.26, 0.34, 0.74, 0.28], // lush rich green meadow grass (rumput hijau asri cerah)
+      [0.50, 0.48, 0.70, 0.26], // sunlit fertile hillside & rich loam (tanah subur & vegetasi)
+      [0.72, 0.54, 0.56, 0.40], // highland slopes & warm mossy stone
+      [0.95, 0.38, 0.68, 0.32], // vibrant emerald peak
     ],
   },
   cyberpunk: {
@@ -35,12 +35,12 @@ export const BIOME_PALETTES: Record<BiomeType, {
     fogColor: '#0f172a',
     skyColor: '#090d16',
     stops: [
-      [0.0, 0.04, 0.07, 0.14], // dark abyss
-      [0.15, 0.02, 0.65, 0.78], // neon cyan shore
-      [0.28, 0.10, 0.12, 0.18], // matte carbon grid base
-      [0.55, 0.18, 0.12, 0.30], // dark purple synthetic strata
-      [0.78, 0.78, 0.08, 0.48], // hot magenta cliff edges
-      [0.95, 0.0, 0.88, 0.78], // neon cyber peaks
+      [0.0, 0.05, 0.09, 0.18], // dark abyss
+      [0.15, 0.05, 0.85, 0.95], // bright neon cyan shore
+      [0.28, 0.16, 0.18, 0.26], // matte carbon grid base
+      [0.55, 0.32, 0.22, 0.46], // luminous synthetic strata
+      [0.78, 0.92, 0.14, 0.58], // vivid hot magenta cliff edges
+      [0.95, 0.12, 0.98, 0.88], // brilliant neon cyber peaks
     ],
   },
   alpine: {
@@ -48,12 +48,12 @@ export const BIOME_PALETTES: Record<BiomeType, {
     fogColor: '#e0f2fe',
     skyColor: '#7dd3fc',
     stops: [
-      [0.0, 0.18, 0.36, 0.46],
-      [0.15, 0.76, 0.72, 0.56], // shore pebbles
-      [0.28, 0.28, 0.66, 0.26], // alpine valley meadow (padang rumput hijau)
-      [0.56, 0.18, 0.50, 0.20], // evergreen forest zone
-      [0.80, 0.44, 0.44, 0.46], // granite crag
-      [0.96, 0.88, 0.92, 0.96], // snow only on the very highest razor tips
+      [0.0, 0.20, 0.42, 0.54],
+      [0.15, 0.88, 0.84, 0.68], // bright shore pebbles
+      [0.28, 0.38, 0.80, 0.32], // sunlit alpine valley meadow (padang rumput hijau cerah)
+      [0.54, 0.30, 0.64, 0.28], // rich pine needle loam & evergreen forest zone
+      [0.78, 0.62, 0.60, 0.58], // warm sunlit granite crag
+      [0.96, 0.96, 0.98, 1.00], // brilliant pristine sunlit snow peak
     ],
   },
   canyon: {
@@ -61,12 +61,12 @@ export const BIOME_PALETTES: Record<BiomeType, {
     fogColor: '#fed7aa',
     skyColor: '#fb923c',
     stops: [
-      [0.0, 0.35, 0.22, 0.15],
-      [0.15, 0.82, 0.62, 0.45], // riverbed sand
-      [0.32, 0.74, 0.42, 0.26], // red clay band
-      [0.58, 0.65, 0.32, 0.20], // terracotta strata
-      [0.80, 0.50, 0.26, 0.16], // dark sandstone cliff
-      [0.95, 0.78, 0.55, 0.36], // sunlit mesa plateau
+      [0.0, 0.40, 0.26, 0.18],
+      [0.15, 0.94, 0.78, 0.54], // sunlit riverbed sand
+      [0.32, 0.88, 0.54, 0.32], // vivid warm red clay band
+      [0.56, 0.82, 0.48, 0.28], // golden terracotta sandstone
+      [0.78, 0.70, 0.40, 0.24], // sun-baked red sandstone cliff
+      [0.95, 0.94, 0.72, 0.46], // sun-drenched golden mesa plateau
     ],
   },
   oasis: {
@@ -74,12 +74,12 @@ export const BIOME_PALETTES: Record<BiomeType, {
     fogColor: '#f5d0fe',
     skyColor: '#e879f9',
     stops: [
-      [0.0, 0.12, 0.35, 0.45],
-      [0.15, 0.92, 0.82, 0.68], // shimmering sand
-      [0.30, 0.26, 0.70, 0.34], // lush oasis grass
-      [0.60, 0.45, 0.32, 0.68], // violet crystal slope
-      [0.82, 0.70, 0.42, 0.80], // lilac mineral rock
-      [0.95, 0.86, 0.72, 0.92], // iridescent peak
+      [0.0, 0.15, 0.42, 0.52],
+      [0.15, 0.98, 0.88, 0.72], // shimmering bright golden sand
+      [0.30, 0.36, 0.84, 0.42], // lush vibrant oasis grass
+      [0.60, 0.58, 0.42, 0.78], // radiant violet crystal slope
+      [0.82, 0.82, 0.54, 0.90], // sunlit lilac mineral rock
+      [0.95, 0.96, 0.86, 0.98], // iridescent crystal summit
     ],
   },
   lowpoly: {
@@ -87,12 +87,12 @@ export const BIOME_PALETTES: Record<BiomeType, {
     fogColor: '#f1f5f9',
     skyColor: '#93c5fd',
     stops: [
-      [0.0, 0.18, 0.48, 0.62],
-      [0.15, 0.90, 0.82, 0.56], // warm sand beach
-      [0.28, 0.30, 0.72, 0.28], // vibrant stylized green meadow (rumput hijau)
-      [0.55, 0.18, 0.60, 0.22], // deep stylized foliage
-      [0.78, 0.38, 0.46, 0.36], // soft stone & mossy earth
-      [0.95, 0.22, 0.52, 0.25], // lush emerald peak
+      [0.0, 0.22, 0.54, 0.68],
+      [0.15, 0.96, 0.88, 0.62], // warm sunny sand beach
+      [0.28, 0.42, 0.84, 0.34], // vibrant stylized green meadow (rumput hijau segar)
+      [0.54, 0.32, 0.72, 0.28], // rich lush foliage & warm earth
+      [0.78, 0.56, 0.62, 0.48], // warm sunlit stone & mossy earth
+      [0.95, 0.42, 0.74, 0.36], // bright emerald peak
     ],
   },
 };
@@ -174,6 +174,69 @@ export function calculateRawHeight(
 }
 
 /**
+ * Applies procedural soil brightness, warmth, and multi-octave micro-noise grain texture
+ * to give realistic earthen texture, silt specks, and sunlit warmth without plastic look.
+ */
+export function applySoilColorAndTexture(
+  r: number,
+  g: number,
+  b: number,
+  worldX: number,
+  worldZ: number,
+  height: number,
+  waterLvl: number,
+  config: TerrainConfig,
+  noise: SimplexNoise2D
+): [number, number, number] {
+  // Only apply terrestrial soil texturing above or near water level
+  if (height < waterLvl - 0.5) {
+    return [r, g, b];
+  }
+
+  const soilBrightness = config.soilBrightness ?? 1.15;
+  const soilWarmth = config.soilWarmth ?? 1.10;
+  const soilGrain = config.soilTextureGrain ?? 0.65;
+
+  // 1. Multi-frequency procedural micro-noise texture
+  let grainOffset = 0;
+  if (soilGrain > 0.001) {
+    // Octave 1: Organik humus & variasi tanah gembur
+    const n1 = noise.noise(worldX * 0.22, worldZ * 0.22);
+    // Octave 2: Butiran tanah & pasir berkerikil halus
+    const n2 = noise.noise(worldX * 0.85 + 17.3, worldZ * 0.85 - 23.9);
+    // Octave 3: Mikro-silt flecks
+    const n3 = noise.noise(worldX * 2.8 - 41.7, worldZ * 2.8 + 67.1);
+
+    grainOffset = (n1 * 0.52 + n2 * 0.33 + n3 * 0.15) * 0.14 * soilGrain;
+  }
+
+  // 2. Kehangatan tanah (Warmth / Sunlit soil undertone)
+  if (soilWarmth !== 1.0) {
+    const warmthDelta = soilWarmth - 1.0;
+    // Boost warm tones (golden clay & amber humus)
+    r = r * (1.0 + warmthDelta * 0.28);
+    g = g * (1.0 + warmthDelta * 0.12);
+    b = b * (1.0 - warmthDelta * 0.14);
+  }
+
+  // 3. Gabungkan butiran mikro-noise bergradasi
+  r = clamp(r + grainOffset * 1.15, 0, 1);
+  g = clamp(g + grainOffset * 0.95, 0, 1);
+  b = clamp(b + grainOffset * 0.75, 0, 1);
+
+  // 4. Kecerahan tanah (Soil Brightness Curve with highlight preservation)
+  if (soilBrightness !== 1.0) {
+    const factor = Math.max(0.5, soilBrightness);
+    const gamma = 1.0 / (factor * 0.96);
+    r = clamp(Math.pow(r, gamma) * (factor > 1 ? 1.04 : 1.0), 0, 1);
+    g = clamp(Math.pow(g, gamma) * (factor > 1 ? 1.04 : 1.0), 0, 1);
+    b = clamp(Math.pow(b, gamma) * (factor > 1 ? 1.02 : 1.0), 0, 1);
+  }
+
+  return [r, g, b];
+}
+
+/**
  * Generate full heightmap and vertex color buffers
  */
 export function generateTerrainData(config: TerrainConfig): TerrainData {
@@ -210,7 +273,9 @@ export function generateTerrainData(config: TerrainConfig): TerrainData {
 
   // Compute vertex colors based on elevation and slope
   for (let j = 0; j < resolution; j++) {
+    const z = -halfSize + j * step;
     for (let i = 0; i < resolution; i++) {
+      const x = -halfSize + i * step;
       const idx = j * resolution + i;
       const h = heights[idx];
 
@@ -258,7 +323,7 @@ export function generateTerrainData(config: TerrainConfig): TerrainData {
         }
       }
 
-      // If slope is steep on dry land, blend toward slate stone or dark earth cliff
+      // If slope is steep on dry land, blend toward sunlit warm slate stone or rich earth cliff
       if (h >= waterLvl && slope > 0.65) {
         const cliffFactor = clamp((slope - 0.65) * 1.6, 0, 0.70);
         if (biome === 'cyberpunk') {
@@ -266,16 +331,19 @@ export function generateTerrainData(config: TerrainConfig): TerrainData {
           g = g * (1 - cliffFactor) + 0.1 * cliffFactor;
           b = b * (1 - cliffFactor) + 0.8 * cliffFactor;
         } else if (biome === 'canyon') {
-          r = r * (1 - cliffFactor) + 0.52 * cliffFactor;
-          g = g * (1 - cliffFactor) + 0.28 * cliffFactor;
-          b = b * (1 - cliffFactor) + 0.18 * cliffFactor;
+          r = r * (1 - cliffFactor) + 0.72 * cliffFactor;
+          g = g * (1 - cliffFactor) + 0.44 * cliffFactor;
+          b = b * (1 - cliffFactor) + 0.28 * cliffFactor;
         } else {
-          // Natural earthy slate and loam tone
-          r = r * (1 - cliffFactor) + 0.38 * cliffFactor;
-          g = g * (1 - cliffFactor) + 0.36 * cliffFactor;
-          b = b * (1 - cliffFactor) + 0.32 * cliffFactor;
+          // Warm sunlit earthy slate & mossy rock cliff (not dull dark gray)
+          r = r * (1 - cliffFactor) + 0.52 * cliffFactor;
+          g = g * (1 - cliffFactor) + 0.48 * cliffFactor;
+          b = b * (1 - cliffFactor) + 0.42 * cliffFactor;
         }
       }
+
+      // Apply procedural soil brightness, warmth, and multi-octave micro-noise grain texture
+      [r, g, b] = applySoilColorAndTexture(r, g, b, x, z, h, waterLvl, config, noise);
 
       const cIdx = idx * 3;
       colors[cIdx] = r;
@@ -298,7 +366,9 @@ export function generateBiomeColors(
   const { resolution, size, biome, waterLevel } = config;
   const palette = BIOME_PALETTES[biome] || BIOME_PALETTES.archipelago;
   const step = size / (resolution - 1);
+  const halfSize = size / 2;
   const colors = new Float32Array(resolution * resolution * 3);
+  const noise = new SimplexNoise2D(config.seed || 2026);
 
   let minH = Infinity;
   let maxH = -Infinity;
@@ -311,7 +381,9 @@ export function generateBiomeColors(
   const landHeight = Math.max(0.001, maxH - waterLevel);
 
   for (let j = 0; j < resolution; j++) {
+    const z = -halfSize + j * step;
     for (let i = 0; i < resolution; i++) {
+      const x = -halfSize + i * step;
       const idx = j * resolution + i;
       const h = heights[idx];
 
@@ -363,15 +435,18 @@ export function generateBiomeColors(
           g = g * (1 - cliffFactor) + 0.1 * cliffFactor;
           b = b * (1 - cliffFactor) + 0.8 * cliffFactor;
         } else if (biome === 'canyon') {
-          r = r * (1 - cliffFactor) + 0.52 * cliffFactor;
-          g = g * (1 - cliffFactor) + 0.28 * cliffFactor;
-          b = b * (1 - cliffFactor) + 0.18 * cliffFactor;
+          r = r * (1 - cliffFactor) + 0.72 * cliffFactor;
+          g = g * (1 - cliffFactor) + 0.44 * cliffFactor;
+          b = b * (1 - cliffFactor) + 0.28 * cliffFactor;
         } else {
-          r = r * (1 - cliffFactor) + 0.38 * cliffFactor;
-          g = g * (1 - cliffFactor) + 0.36 * cliffFactor;
-          b = b * (1 - cliffFactor) + 0.32 * cliffFactor;
+          r = r * (1 - cliffFactor) + 0.52 * cliffFactor;
+          g = g * (1 - cliffFactor) + 0.48 * cliffFactor;
+          b = b * (1 - cliffFactor) + 0.42 * cliffFactor;
         }
       }
+
+      // Apply procedural soil brightness, warmth, and multi-octave micro-noise grain texture
+      [r, g, b] = applySoilColorAndTexture(r, g, b, x, z, h, waterLevel, config, noise);
 
       const cIdx = idx * 3;
       colors[cIdx] = r;

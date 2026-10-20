@@ -728,6 +728,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   const didDragRef = useRef(false);
   const mouseDownPosRef = useRef({ x: 0, y: 0 });
   const lastRaycastTimeRef = useRef(0);
+  const lastPinDragTimeRef = useRef(0);
 
   // Redundant terrain geometry re-render guard (Rule 3)
   const lastAppliedHeightsRef = useRef<Float32Array | null>(null);
@@ -841,10 +842,11 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       isHeadlessOrBot ||
       /llvmpipe|swiftshader|mesa|software|cpu/i.test(unmaskedRenderer);
 
-    // Render resolution scale: renderer.setPixelRatio(window.devicePixelRatio * scale)
-    const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
+    // Render resolution scale: renderer.setPixelRatio(window.devicePixelRatio * scale) with 2.0 clamp
+    const rawDpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
+    const dpr = Math.min(rawDpr, 2.0);
     const initialScale = propsRef.current.renderScale || 1.0;
-    renderer.setPixelRatio(dpr * initialScale);
+    renderer.setPixelRatio(Math.min(dpr * initialScale, 2.0));
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.0;
@@ -1390,9 +1392,10 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
       renderer.setSize(w, h);
-      const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
+      const rawDpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
+      const dpr = Math.min(rawDpr, 2.0);
       const scale = propsRef.current.renderScale || 1.0;
-      renderer.setPixelRatio(dpr * scale);
+      renderer.setPixelRatio(Math.min(dpr * scale, 2.0));
     };
 
     window.addEventListener('resize', handleResize);
@@ -1434,8 +1437,9 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   useEffect(() => {
     const renderer = rendererRef.current;
     if (!renderer) return;
-    const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
-    renderer.setPixelRatio(dpr * renderScale);
+    const rawDpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
+    const dpr = Math.min(rawDpr, 2.0);
+    renderer.setPixelRatio(Math.min(dpr * renderScale, 2.0));
   }, [renderScale]);
 
   // Sync terrain geometry positions and colors when heights/colors change (Rule 3)
@@ -1452,6 +1456,40 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
 
     if (isSameHeights && isSameColors && isSameRes && isSameSize && isSameSmooth) {
       return;
+    }
+
+    // In-place ultra-fast color attribute buffer upload when geometry has not changed
+    if (isSameHeights && isSameRes && isSameSize && isSameSmooth && !isSameColors && terrain.geometry) {
+      const colorAttr = terrain.geometry.attributes.color;
+      if (colorAttr) {
+        if (terrainConfig.smoothShading) {
+          (colorAttr.array as Float32Array).set(colors);
+        } else {
+          const res = terrainConfig.resolution;
+          const quadsX = res - 1;
+          const quadsZ = res - 1;
+          const buf = colorAttr.array as Float32Array;
+          let vIdx = 0;
+          for (let j = 0; j < quadsZ; j++) {
+            for (let i = 0; i < quadsX; i++) {
+              const idxA = j * res + i;
+              const idxB = j * res + (i + 1);
+              const idxC = (j + 1) * res + i;
+              const idxD = (j + 1) * res + (i + 1);
+              const triIndices = [idxA, idxC, idxB, idxB, idxC, idxD];
+              for (const ci of triIndices) {
+                buf[vIdx * 3] = colors[ci * 3];
+                buf[vIdx * 3 + 1] = colors[ci * 3 + 1];
+                buf[vIdx * 3 + 2] = colors[ci * 3 + 2];
+                vIdx++;
+              }
+            }
+          }
+        }
+        colorAttr.needsUpdate = true;
+        lastAppliedColorsRef.current = colors;
+        return;
+      }
     }
 
     lastAppliedHeightsRef.current = heights;
@@ -2560,8 +2598,14 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       didDragRef.current = true;
     }
 
-    // Direct touch-drag for Navigation Pins A and B
+    // Direct touch-drag for Navigation Pins A, B, and C with throttling to prevent frame drops
     if (draggingPinRef.current) {
+      const now = performance.now();
+      if (now - lastPinDragTimeRef.current < 25) {
+        return;
+      }
+      lastPinDragTimeRef.current = now;
+
       const pinId = draggingPinRef.current;
       const pt = getTerrainIntersection(e.clientX, e.clientY);
       if (pt) {

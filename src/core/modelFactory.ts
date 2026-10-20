@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { PaletteItem } from '../types';
+import { PaletteItem, FarmPlotStage } from '../types';
 
 // Pre-create reusable contact shadow texture & material
 let contactShadowTexture: THREE.CanvasTexture | null = null;
@@ -384,6 +384,7 @@ export function createCyberApartment(): THREE.Group {
 export function createPineTree(): THREE.Group {
   const group = new THREE.Group();
   group.name = 'pine_tree';
+  group.userData = { isWindFoliage: true };
 
   // 1. Tapered Wooden Trunk
   const trunkGeo = new THREE.CylinderGeometry(0.25, 0.45, 2.2, 7);
@@ -445,6 +446,7 @@ export function createPineTree(): THREE.Group {
 export function createBroadleafTree(): THREE.Group {
   const group = new THREE.Group();
   group.name = 'broadleaf_tree';
+  group.userData = { isWindFoliage: true };
 
   // 1. Organic Trunk
   const trunkGeo = makeFlatShadedGeo(new THREE.CylinderGeometry(0.35, 0.6, 2.6, 8));
@@ -513,6 +515,7 @@ export function createBroadleafTree(): THREE.Group {
 export function createMeadowGrass(): THREE.Group {
   const group = new THREE.Group();
   group.name = 'meadow_grass';
+  group.userData = { isWindFoliage: true };
 
   // Natural botanical color spectrum for lush meadow grass
   const matForest = createMobileMat({ color: 0x15803d, roughness: 0.65 });
@@ -635,6 +638,7 @@ export function createMeadowGrass(): THREE.Group {
 export function createFlowerPatch(): THREE.Group {
   const group = new THREE.Group();
   group.name = 'flower_patch';
+  group.userData = { isWindFoliage: true };
 
   // 1. Botanical materials for base grass blades
   const matGrassDark = createMobileMat({ color: 0x15803d, roughness: 0.65 });

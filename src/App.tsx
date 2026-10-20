@@ -27,6 +27,7 @@ import {
   exportSceneAsGLTF,
   exportSceneAsOBJ,
   exportSceneAsThreeJSON,
+  exportFullProjectBundleZip,
   parseUploaded3DFile,
 } from './core/assetIO';
 import { createPRNG } from './core/math';
@@ -62,6 +63,9 @@ const DEFAULT_TERRAIN_CONFIG: TerrainConfig = {
   },
   trailWidth: 2.2, // Natural slim walking trail proportion (diameter ~4.4 units)
   trailEdgeDecoration: true, // Dekorasi tepian: batu pembatas paving + rumput bunga
+  soilBrightness: 1.15, // Kecerahan tanah hangat alami (115%)
+  soilWarmth: 1.10,     // Kehangatan / saturasi tanah alami (110%)
+  soilTextureGrain: 0.65, // Tekstur mikro-noise butiran alami (65%)
 };
 
 export default function App() {
@@ -960,6 +964,29 @@ export default function App() {
     const nextConfig = { ...terrainConfig, ...updates };
     setTerrainConfig(nextConfig);
 
+    // Fast-path: If only soil visual parameters changed, recalculate colors only (instant 60 FPS)
+    const isOnlySoilVisuals =
+      (updates.soilBrightness !== undefined || updates.soilWarmth !== undefined || updates.soilTextureGrain !== undefined) &&
+      updates.seed === undefined &&
+      updates.size === undefined &&
+      updates.resolution === undefined &&
+      updates.heightScale === undefined &&
+      updates.roughness === undefined &&
+      updates.waterLevel === undefined &&
+      updates.islandFalloff === undefined &&
+      updates.terraceSteps === undefined &&
+      updates.biome === undefined &&
+      updates.islandCoverage === undefined;
+
+    if (isOnlySoilVisuals) {
+      const nextColors = generateBiomeColors(terrainData.heights, nextConfig);
+      setTerrainData((prev) => ({
+        ...prev,
+        colors: nextColors,
+      }));
+      return;
+    }
+
     // If biome changed, adapt timeOfDay atmosphere
     if (updates.biome && updates.biome !== terrainConfig.biome) {
       if (updates.biome === 'cyberpunk') setTimeOfDay('cyberpunk');
@@ -1433,33 +1460,99 @@ export default function App() {
     setBrushSettings((prev) => ({ ...prev, mode: 'place' }));
   };
 
-  // Exports
-  const handleExportOBJ = () => {
+  // Exports packaged into ZIP archives
+  const handleExportOBJ = async () => {
     if (exportGroupRef.current) {
-      exportSceneAsOBJ(exportGroupRef.current, `terraforge_${terrainConfig.biome}_world.obj`);
+      setToastMessage('📦 Mengemas dan mengunduh Wavefront OBJ (.zip)...');
+      try {
+        await exportSceneAsOBJ(
+          exportGroupRef.current,
+          `terraforge_${terrainConfig.biome}_world.obj`,
+          terrainConfig,
+          placedObjects
+        );
+        setToastMessage('✅ Wavefront OBJ (.zip) berhasil diunduh!');
+      } catch (e: any) {
+        setToastMessage('❌ Gagal ekspor OBJ: ' + e?.message);
+      }
+      setTimeout(() => setToastMessage(null), 3500);
     }
   };
 
-  const handleExportGLB = () => {
+  const handleExportGLB = async () => {
     if (exportGroupRef.current) {
-      exportSceneAsGLTF(exportGroupRef.current, true, `terraforge_${terrainConfig.biome}_world.glb`);
+      setToastMessage('📦 Mengemas dan mengunduh glTF / GLB (.zip)...');
+      try {
+        await exportSceneAsGLTF(
+          exportGroupRef.current,
+          true,
+          `terraforge_${terrainConfig.biome}_world.glb`,
+          terrainConfig,
+          placedObjects
+        );
+        setToastMessage('✅ glTF / GLB Binary (.zip) berhasil diunduh!');
+      } catch (e: any) {
+        setToastMessage('❌ Gagal ekspor GLB: ' + e?.message);
+      }
+      setTimeout(() => setToastMessage(null), 3500);
     }
   };
 
-  const handleExportThreeJSON = () => {
+  const handleExportThreeJSON = async () => {
     if (exportGroupRef.current) {
-      exportSceneAsThreeJSON(exportGroupRef.current, `terraforge_${terrainConfig.biome}_scene.json`);
+      setToastMessage('📦 Mengemas dan mengunduh Three.js Scene JSON (.zip)...');
+      try {
+        await exportSceneAsThreeJSON(
+          exportGroupRef.current,
+          `terraforge_${terrainConfig.biome}_scene.json`,
+          terrainConfig,
+          placedObjects
+        );
+        setToastMessage('✅ Three.js Scene JSON (.zip) berhasil diunduh!');
+      } catch (e: any) {
+        setToastMessage('❌ Gagal ekspor JSON: ' + e?.message);
+      }
+      setTimeout(() => setToastMessage(null), 3500);
     }
   };
 
-  const handleExportHeightmap = () => {
-    exportHeightmapPNG(
-      terrainData.heights,
-      terrainConfig.resolution,
-      terrainData.minHeight,
-      terrainData.maxHeight,
-      `terraforge_${terrainConfig.biome}_heightmap.png`
-    );
+  const handleExportHeightmap = async () => {
+    setToastMessage('📦 Mengemas dan mengunduh Heightmap Grayscale PNG (.zip)...');
+    try {
+      await exportHeightmapPNG(
+        terrainData.heights,
+        terrainConfig.resolution,
+        terrainData.minHeight,
+        terrainData.maxHeight,
+        `terraforge_${terrainConfig.biome}_heightmap.png`,
+        terrainConfig
+      );
+      setToastMessage('✅ Heightmap PNG (.zip) berhasil diunduh!');
+    } catch (e: any) {
+      setToastMessage('❌ Gagal ekspor Heightmap: ' + e?.message);
+    }
+    setTimeout(() => setToastMessage(null), 3500);
+  };
+
+  const handleExportFullBundle = async () => {
+    if (exportGroupRef.current) {
+      setToastMessage('📦 Mengompres seluruh format (GLB, OBJ, JSON, PNG) ke dalam satu file ZIP...');
+      try {
+        await exportFullProjectBundleZip(
+          exportGroupRef.current,
+          terrainData.heights,
+          terrainData.minHeight,
+          terrainData.maxHeight,
+          terrainConfig,
+          placedObjects,
+          `terraforge_${terrainConfig.biome}_full_project`
+        );
+        setToastMessage('✅ Paket Lengkap Semua Format (.zip) berhasil diunduh!');
+      } catch (e: any) {
+        setToastMessage('❌ Gagal ekspor Paket Lengkap: ' + e?.message);
+      }
+      setTimeout(() => setToastMessage(null), 4000);
+    }
   };
 
   // Global hotkeys
@@ -1594,6 +1687,8 @@ export default function App() {
           setToastMessage(msg);
           setTimeout(() => setToastMessage(null), 3500);
         }}
+        isRoadBuilderActive={isRoadBuilderActive}
+        onToggleRoadBuilder={handleToggleRoadBuilder}
       />
 
       {/* Top Navigation & Status Bar - Hidden during Fullscreen */}
@@ -1622,6 +1717,8 @@ export default function App() {
           onCyclePerformanceMode={handleCyclePerformanceMode}
           isFullscreen={isFullscreen}
           onToggleFullscreen={handleToggleFullscreen}
+          isRoadBuilderActive={isRoadBuilderActive}
+          onToggleRoadBuilder={handleToggleRoadBuilder}
         />
       )}
 
@@ -1677,6 +1774,7 @@ export default function App() {
           onExportGLB={handleExportGLB}
           onExportThreeJSON={handleExportThreeJSON}
           onExportHeightmap={handleExportHeightmap}
+          onExportFullBundle={handleExportFullBundle}
           isCollapsed={isDockCollapsed}
           onToggleCollapse={() => setIsDockCollapsed((prev) => !prev)}
           performanceMode={performanceMode}
@@ -1691,6 +1789,8 @@ export default function App() {
           onTabChange={setDockTab}
           onTidyUpScene={handleTidyUpScene}
           onResetTrailColors={handleResetTrailColors}
+          isRoadBuilderActive={isRoadBuilderActive}
+          onToggleRoadBuilder={handleToggleRoadBuilder}
         />
       )}
 

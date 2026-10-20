@@ -93,6 +93,7 @@ interface ControlDockProps {
   onExportGLB: () => void;
   onExportThreeJSON: () => void;
   onExportHeightmap: () => void;
+  onExportFullBundle?: () => void;
   isCollapsed: boolean;
   onToggleCollapse: () => void;
   graphicsPreset?: GraphicsPreset;
@@ -166,6 +167,7 @@ export const ControlDock: React.FC<ControlDockProps> = ({
   onExportGLB,
   onExportThreeJSON,
   onExportHeightmap,
+  onExportFullBundle,
   isCollapsed,
   onToggleCollapse,
   graphicsPreset = 'MEDIUM',
@@ -753,6 +755,153 @@ export const ControlDock: React.FC<ControlDockProps> = ({
                   className="w-full accent-emerald-500 cursor-pointer"
                   title="Turunkan segmen poligon mesh untuk vertex lebih sedikit dan rendering lebih ringan di mobile"
                 />
+              </div>
+            </div>
+
+            {/* Pewarnaan & Tekstur Permukaan Tanah (Soil Brightness, Warmth & Micro-noise Texture) */}
+            <div className="p-3 rounded-xl bg-slate-800/60 border border-amber-500/30 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-700/60 pb-2">
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-6 rounded-lg bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 shrink-0">
+                    <Sun className="w-3.5 h-3.5" />
+                  </div>
+                  <div>
+                    <span className="text-xs font-bold text-slate-200">Kecerahan & Tekstur Tanah Alami</span>
+                    <span className="hidden sm:inline text-[11px] text-slate-400 ml-2">· Butiran mikro-noise & warna hangat</span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => onUpdateTerrainConfig({ soilBrightness: 1.15, soilWarmth: 1.10, soilTextureGrain: 0.65 })}
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-700 hover:bg-slate-650 text-slate-200 text-xs font-semibold transition-colors"
+                    title="Kembalikan ke rekomendasi warna tanah optimal"
+                  >
+                    <RotateCw className="w-3 h-3 text-amber-400" />
+                    <span>Reset Default</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* 3 Interactive Sliders: Kecerahan, Tekstur Butiran, Kehangatan */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {/* 1. Kecerahan Tanah */}
+                <div className="bg-slate-900/60 p-2.5 rounded-lg border border-slate-700/50">
+                  <div className="flex justify-between text-xs font-semibold text-slate-300 mb-1.5">
+                    <span className="flex items-center gap-1">
+                      <Sun className="w-3 h-3 text-amber-400" />
+                      <span>Kecerahan Tanah</span>
+                    </span>
+                    <span className="text-amber-400 font-mono font-bold">
+                      {Math.round((terrainConfig.soilBrightness ?? 1.15) * 100)}%
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0.80"
+                    max="1.50"
+                    step="0.05"
+                    value={terrainConfig.soilBrightness ?? 1.15}
+                    onChange={(e) => onUpdateTerrainConfig({ soilBrightness: parseFloat(e.target.value) })}
+                    className="w-full accent-amber-500 cursor-pointer"
+                    title="Menaikkan atau menurunkan tingkat kecerahan warna tanah dan lereng"
+                  />
+                  <div className="flex justify-between text-[10px] text-slate-500 mt-1 font-mono">
+                    <span>80% Lembut</span>
+                    <span>115% Optimal</span>
+                    <span>150% Terang</span>
+                  </div>
+                </div>
+
+                {/* 2. Tekstur & Butiran Organik */}
+                <div className="bg-slate-900/60 p-2.5 rounded-lg border border-slate-700/50">
+                  <div className="flex justify-between text-xs font-semibold text-slate-300 mb-1.5">
+                    <span className="flex items-center gap-1">
+                      <Layers className="w-3 h-3 text-emerald-400" />
+                      <span>Tekstur Butiran</span>
+                    </span>
+                    <span className="text-emerald-400 font-mono font-bold">
+                      {Math.round((terrainConfig.soilTextureGrain ?? 0.65) * 100)}%
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0.00"
+                    max="1.00"
+                    step="0.05"
+                    value={terrainConfig.soilTextureGrain ?? 0.65}
+                    onChange={(e) => onUpdateTerrainConfig({ soilTextureGrain: parseFloat(e.target.value) })}
+                    className="w-full accent-emerald-500 cursor-pointer"
+                    title="Intensitas variasi mikro-noise butiran pasir, kerikil halus, dan tanah humus"
+                  />
+                  <div className="flex justify-between text-[10px] text-slate-500 mt-1 font-mono">
+                    <span>0% Halus</span>
+                    <span>65% Berbutir</span>
+                    <span>100% Kasar</span>
+                  </div>
+                </div>
+
+                {/* 3. Kehangatan / Saturasi Tanah */}
+                <div className="bg-slate-900/60 p-2.5 rounded-lg border border-slate-700/50">
+                  <div className="flex justify-between text-xs font-semibold text-slate-300 mb-1.5">
+                    <span className="flex items-center gap-1">
+                      <Palette className="w-3 h-3 text-orange-400" />
+                      <span>Kehangatan Tanah</span>
+                    </span>
+                    <span className="text-orange-400 font-mono font-bold">
+                      {Math.round((terrainConfig.soilWarmth ?? 1.10) * 100)}%
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0.85"
+                    max="1.35"
+                    step="0.05"
+                    value={terrainConfig.soilWarmth ?? 1.10}
+                    onChange={(e) => onUpdateTerrainConfig({ soilWarmth: parseFloat(e.target.value) })}
+                    className="w-full accent-orange-500 cursor-pointer"
+                    title="Menambah rona hangat keemasan pada tanah liat dan pasir pantai"
+                  />
+                  <div className="flex justify-between text-[10px] text-slate-500 mt-1 font-mono">
+                    <span>85% Netral</span>
+                    <span>110% Hangat</span>
+                    <span>135% Keemasan</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Quick Visual Tone Presets */}
+              <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                <span className="text-[11px] text-slate-400 font-medium mr-1">Preset Cepat:</span>
+                <button
+                  type="button"
+                  onClick={() => onUpdateTerrainConfig({ soilBrightness: 1.25, soilTextureGrain: 0.70, soilWarmth: 1.18 })}
+                  className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/30 text-xs font-semibold transition-colors"
+                >
+                  ☀️ Cerah Hangat
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onUpdateTerrainConfig({ soilBrightness: 1.12, soilTextureGrain: 0.85, soilWarmth: 1.05 })}
+                  className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-emerald-500/30 text-xs font-semibold transition-colors"
+                >
+                  🌿 Tropis Lembab
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onUpdateTerrainConfig({ soilBrightness: 1.35, soilTextureGrain: 0.90, soilWarmth: 1.22 })}
+                  className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-orange-300 border border-orange-500/30 text-xs font-semibold transition-colors"
+                >
+                  ✨ Kontras Tinggi
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onUpdateTerrainConfig({ soilBrightness: 1.00, soilTextureGrain: 0.40, soilWarmth: 1.00 })}
+                  className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition-colors"
+                >
+                  🎨 Standar Lembut
+                </button>
               </div>
             </div>
 
@@ -2138,94 +2287,159 @@ export const ControlDock: React.FC<ControlDockProps> = ({
 
         {/* TAB 5: Export 3D */}
         {activeTab === 'export' && (
-          <div className="space-y-4">
-            <div>
-              <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider mb-1">
-                Export to Standard 3D Formats
-              </h4>
-              <p className="text-xs text-slate-400">
-                Download your complete sculpted world with all placed architecture, trees, and terrain meshes for external rendering or game engines.
-              </p>
+          <div className="space-y-3.5">
+            {/* Header with ZIP Info Banner */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3 rounded-xl bg-slate-900/90 border border-emerald-500/40">
+              <div>
+                <div className="flex items-center gap-2 mb-0.5">
+                  <span className="text-xs font-bold text-white uppercase tracking-wider">
+                    Ekspor Dunia 3D (Format Arsip ZIP)
+                  </span>
+                  <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                    ZIP Terstruktur
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-300 leading-tight">
+                  Seluruh hasil ekspor otomatis dikemas ke dalam arsip <strong>.zip</strong> rapi, lengkap dengan file model 3D, <strong>metadata.json</strong> (konfigurasi pulau, bioma, seed, dan daftar objek), serta panduan impor <strong>README.txt</strong> untuk Blender, Unity, dan Unreal Engine.
+                </p>
+              </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
-              {/* OBJ Export */}
-              <div className="p-3 rounded-xl bg-slate-800 border border-slate-700 flex flex-col justify-between">
-                <div>
-                  <div className="flex items-center gap-1.5 mb-1 text-slate-200 font-bold text-xs">
-                    <Download className="w-3.5 h-3.5 text-emerald-400" />
-                    <span>Wavefront OBJ (.obj)</span>
+            {/* Hero Card: Paket Lengkap Semua Format (Full Bundle ZIP) */}
+            {onExportFullBundle && (
+              <div className="p-3.5 rounded-2xl bg-gradient-to-r from-emerald-950/60 via-slate-900/90 to-teal-950/60 border border-emerald-500/60 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 shadow-xl">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-500/50 flex items-center justify-center text-emerald-400 shrink-0">
+                    <Download className="w-5 h-5 text-emerald-400" />
                   </div>
-                  <p className="text-[11px] text-slate-400 mb-3">
-                    Universal geometry format. Best for Blender, Maya, 3ds Max, ZBrush.
-                  </p>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-bold text-white">Paket Lengkap Proyek Pulau (All-In-One ZIP)</span>
+                      <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-emerald-500/25 text-emerald-200 border border-emerald-400/50">
+                        Rekomendasi
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-300">
+                      Satu klik unduh seluruh format sekaligus dalam sub-folder rapi: <strong>/models/ (.glb & .obj)</strong>, <strong>/heightmaps/ (.png)</strong>, <strong>/scene/ (.json)</strong>, dan metadata.
+                    </p>
+                  </div>
                 </div>
+
                 <button
                   type="button"
-                  onClick={onExportOBJ}
-                  className="w-full py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-colors"
+                  onClick={onExportFullBundle}
+                  className="flex items-center justify-center gap-2 px-4 py-2.5 min-h-[44px] rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white font-bold text-xs shadow-lg shadow-emerald-950/60 active:scale-95 transition-all cursor-pointer shrink-0 whitespace-nowrap"
+                  title="Unduh seluruh format 3D (GLB, OBJ, JSON, Heightmap) dalam satu file ZIP"
                 >
-                  Download OBJ
+                  <Download className="w-4 h-4" />
+                  <span>Unduh Paket Lengkap (.zip)</span>
                 </button>
               </div>
+            )}
 
+            {/* Individual Export Cards Grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
               {/* GLTF / GLB Export */}
-              <div className="p-3 rounded-xl bg-slate-800 border border-slate-700 flex flex-col justify-between">
+              <div className="p-3 rounded-xl bg-slate-900/90 border border-slate-700/80 hover:border-cyan-500/50 flex flex-col justify-between transition-colors">
                 <div>
-                  <div className="flex items-center gap-1.5 mb-1 text-slate-200 font-bold text-xs">
-                    <Download className="w-3.5 h-3.5 text-cyan-400" />
-                    <span>GLTF / GLB (.glb)</span>
+                  <div className="flex items-center justify-between gap-1 mb-1">
+                    <div className="flex items-center gap-1.5 text-slate-200 font-bold text-xs">
+                      <Download className="w-3.5 h-3.5 text-cyan-400" />
+                      <span>glTF / GLB Binary</span>
+                    </div>
+                    <span className="text-[9px] font-mono font-bold px-1 py-0.2 rounded bg-cyan-500/20 text-cyan-300">
+                      .ZIP
+                    </span>
                   </div>
-                  <p className="text-[11px] text-slate-400 mb-3">
-                    Modern PBR binary format. Best for Godot, Unity, Unreal, and WebGL.
+                  <p className="text-[11px] text-slate-400 mb-3 leading-tight">
+                    Format modern PBR biner terkompresi. Siap dibuka di Blender, Godot, Unity, dan Three.js.
                   </p>
                 </div>
                 <button
                   type="button"
                   onClick={onExportGLB}
-                  className="w-full py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold transition-colors"
+                  className="w-full py-2 min-h-[38px] rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold transition-all shadow-md active:scale-95 cursor-pointer flex items-center justify-center gap-1.5"
                 >
-                  Download GLB
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Unduh GLB (.zip)</span>
+                </button>
+              </div>
+
+              {/* OBJ Export */}
+              <div className="p-3 rounded-xl bg-slate-900/90 border border-slate-700/80 hover:border-emerald-500/50 flex flex-col justify-between transition-colors">
+                <div>
+                  <div className="flex items-center justify-between gap-1 mb-1">
+                    <div className="flex items-center gap-1.5 text-slate-200 font-bold text-xs">
+                      <Download className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>Wavefront OBJ</span>
+                    </div>
+                    <span className="text-[9px] font-mono font-bold px-1 py-0.2 rounded bg-emerald-500/20 text-emerald-300">
+                      .ZIP
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-400 mb-3 leading-tight">
+                    Format polygon universal standar industri. Kompatibel dengan Maya, 3ds Max, Blender, dan ZBrush.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={onExportOBJ}
+                  className="w-full py-2 min-h-[38px] rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all shadow-md active:scale-95 cursor-pointer flex items-center justify-center gap-1.5"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Unduh OBJ (.zip)</span>
                 </button>
               </div>
 
               {/* Three.js JSON Export */}
-              <div className="p-3 rounded-xl bg-slate-800 border border-slate-700 flex flex-col justify-between">
+              <div className="p-3 rounded-xl bg-slate-900/90 border border-slate-700/80 hover:border-amber-500/50 flex flex-col justify-between transition-colors">
                 <div>
-                  <div className="flex items-center gap-1.5 mb-1 text-slate-200 font-bold text-xs">
-                    <Download className="w-3.5 h-3.5 text-amber-400" />
-                    <span>Three.js JSON (.json)</span>
+                  <div className="flex items-center justify-between gap-1 mb-1">
+                    <div className="flex items-center gap-1.5 text-slate-200 font-bold text-xs">
+                      <Download className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Three.js Scene JSON</span>
+                    </div>
+                    <span className="text-[9px] font-mono font-bold px-1 py-0.2 rounded bg-amber-500/20 text-amber-300">
+                      .ZIP
+                    </span>
                   </div>
-                  <p className="text-[11px] text-slate-400 mb-3">
-                    Native Three.js Object3D hierarchy JSON for web apps.
+                  <p className="text-[11px] text-slate-400 mb-3 leading-tight">
+                    Hierarki struktur objek native Three.js untuk aplikasi web dan simulasi grafis kustom.
                   </p>
                 </div>
                 <button
                   type="button"
                   onClick={onExportThreeJSON}
-                  className="w-full py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold transition-colors"
+                  className="w-full py-2 min-h-[38px] rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold transition-all shadow-md active:scale-95 cursor-pointer flex items-center justify-center gap-1.5"
                 >
-                  Download JSON
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Unduh JSON (.zip)</span>
                 </button>
               </div>
 
               {/* Heightmap PNG Export */}
-              <div className="p-3 rounded-xl bg-slate-800 border border-slate-700 flex flex-col justify-between">
+              <div className="p-3 rounded-xl bg-slate-900/90 border border-slate-700/80 hover:border-purple-500/50 flex flex-col justify-between transition-colors">
                 <div>
-                  <div className="flex items-center gap-1.5 mb-1 text-slate-200 font-bold text-xs">
-                    <Download className="w-3.5 h-3.5 text-purple-400" />
-                    <span>Heightmap PNG (.png)</span>
+                  <div className="flex items-center justify-between gap-1 mb-1">
+                    <div className="flex items-center gap-1.5 text-slate-200 font-bold text-xs">
+                      <Download className="w-3.5 h-3.5 text-purple-400" />
+                      <span>Heightmap Grayscale</span>
+                    </div>
+                    <span className="text-[9px] font-mono font-bold px-1 py-0.2 rounded bg-purple-500/20 text-purple-300">
+                      .ZIP
+                    </span>
                   </div>
-                  <p className="text-[11px] text-slate-400 mb-3">
-                    Grayscale displacement heightmap image for terrain shaders.
+                  <p className="text-[11px] text-slate-400 mb-3 leading-tight">
+                    Tekstur grayscale 2D elevasi kontur medan untuk displacement map shader Unity/Unreal/Blender.
                   </p>
                 </div>
                 <button
                   type="button"
                   onClick={onExportHeightmap}
-                  className="w-full py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition-colors"
+                  className="w-full py-2 min-h-[38px] rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition-all shadow-md active:scale-95 cursor-pointer flex items-center justify-center gap-1.5"
                 >
-                  Download PNG
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Unduh PNG (.zip)</span>
                 </button>
               </div>
             </div>
