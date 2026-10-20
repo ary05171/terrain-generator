@@ -1803,60 +1803,58 @@ export function createPathCurbStones(): THREE.Group {
   const group = new THREE.Group();
   group.name = 'path_curb_stones';
 
-  const stoneMatA = createMobileMat({ color: 0x475569, roughness: 0.85, metalness: 0.1 });
-  const stoneMatB = createMobileMat({ color: 0x3f4e63, roughness: 0.88, metalness: 0.08 });
-  const mortarMat = createMobileMat({ color: 0x1e293b, roughness: 0.95 });
+  const stoneMatA = createMobileMat({ color: 0x526075, roughness: 0.85, metalness: 0.08 });
+  const stoneMatB = createMobileMat({ color: 0x475569, roughness: 0.88, metalness: 0.06 });
+  const skirtMat = createMobileMat({ color: 0x334155, roughness: 0.95 });
 
-  // Mortar foundation strip
-  const foundationGeo = new THREE.BoxGeometry(0.32, 0.06, 2.8);
-  const foundation = new THREE.Mesh(foundationGeo, mortarMat);
-  foundation.position.set(0, 0.03, 0);
-  foundation.receiveShadow = true;
-  group.add(foundation);
+  // Subterranean foundation skirt (anchors deep into slope so underside never floats in air)
+  const skirtGeo = new THREE.BoxGeometry(0.28, 0.28, 0.92);
+  const skirt = new THREE.Mesh(skirtGeo, skirtMat);
+  skirt.position.set(0, -0.06, 0);
+  skirt.receiveShadow = true;
+  group.add(skirt);
 
-  // 4 modular interlocking curb blocks
-  const blockGeo = makeFlatShadedGeo(new THREE.BoxGeometry(0.26, 0.18, 0.64));
-  const zPositions = [-0.99, -0.33, 0.33, 0.99];
+  // 2 compact beveled curb blocks (0.42m each = 0.88m total length)
+  const blockGeo = makeFlatShadedGeo(new THREE.BoxGeometry(0.24, 0.16, 0.42));
+  const zPositions = [-0.22, 0.22];
 
   zPositions.forEach((zp, idx) => {
     const block = new THREE.Mesh(blockGeo, idx % 2 === 0 ? stoneMatA : stoneMatB);
-    block.position.set(0, 0.10, zp);
+    block.position.set(0, 0.08, zp);
     block.castShadow = true;
     block.receiveShadow = true;
     group.add(block);
-
-    // Dark joint line between blocks
-    if (idx < zPositions.length - 1) {
-      const jointGeo = new THREE.BoxGeometry(0.28, 0.19, 0.04);
-      const joint = new THREE.Mesh(jointGeo, mortarMat);
-      joint.position.set(0, 0.095, zp + 0.33);
-      group.add(joint);
-    }
   });
 
-  group.add(createContactShadowDisc(1.6));
   return group;
 }
 
 /**
- * 20. Batu Pembatas Paving & Rumput Bunga Alami (Path Curb with Natural Foliage - 16 composite parts)
- * Combines granite curb stones on the inner road edge with lush wildflower clusters on the outer shoulder.
+ * 20. Batu Pembatas Paving & Rumput Bunga Alami (Path Curb with Natural Foliage)
+ * Combines granite curb stones with lush wildflower clusters firmly grounded.
  */
 export function createPathCurbWithFoliage(): THREE.Group {
   const group = new THREE.Group();
   group.name = 'path_curb_with_foliage';
 
-  const stoneMatA = createMobileMat({ color: 0x475569, roughness: 0.85 });
-  const stoneMatB = createMobileMat({ color: 0x526075, roughness: 0.88 });
-  const mortarMat = createMobileMat({ color: 0x1e293b, roughness: 0.95 });
+  const stoneMatA = createMobileMat({ color: 0x526075, roughness: 0.85 });
+  const stoneMatB = createMobileMat({ color: 0x475569, roughness: 0.88 });
+  const skirtMat = createMobileMat({ color: 0x334155, roughness: 0.95 });
 
-  // 1. Curb stone blocks on inner roadside (X = -0.08)
-  const blockGeo = makeFlatShadedGeo(new THREE.BoxGeometry(0.24, 0.18, 0.64));
-  const zPositions = [-0.99, -0.33, 0.33, 0.99];
+  // Subterranean anchor skirt
+  const skirtGeo = new THREE.BoxGeometry(0.32, 0.28, 0.92);
+  const skirt = new THREE.Mesh(skirtGeo, skirtMat);
+  skirt.position.set(-0.02, -0.06, 0);
+  skirt.receiveShadow = true;
+  group.add(skirt);
+
+  // 2 curb stone blocks
+  const blockGeo = makeFlatShadedGeo(new THREE.BoxGeometry(0.22, 0.16, 0.42));
+  const zPositions = [-0.22, 0.22];
 
   zPositions.forEach((zp, idx) => {
     const block = new THREE.Mesh(blockGeo, idx % 2 === 0 ? stoneMatA : stoneMatB);
-    block.position.set(-0.08, 0.10, zp);
+    block.position.set(-0.06, 0.08, zp);
     block.castShadow = true;
     block.receiveShadow = true;
     group.add(block);

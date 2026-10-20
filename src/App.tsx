@@ -106,6 +106,7 @@ export default function App() {
 
   // Two-Point Road Builder State (Pin A ⇄ B)
   const [isRoadBuilderActive, setIsRoadBuilderActive] = useState<boolean>(false);
+  const [cameraTouchMode, setCameraTouchMode] = useState<'rotate' | 'pan' | 'zoom'>('rotate');
 
   const handleToggleRoadBuilder = useCallback(() => {
     setIsRoadBuilderActive((prev) => {
@@ -1323,7 +1324,12 @@ export default function App() {
   // Reset road vertex colors back to natural biome colors (cleans away old wide paths)
   const handleResetTrailColors = useCallback(() => {
     const cleanColors = generateBiomeColors(terrainData.heights, terrainConfig);
-    const nonTrailObjects = placedObjects.filter((o) => !o.id.startsWith('trail_prop_'));
+    const nonTrailObjects = placedObjects.filter(
+      (o) =>
+        !o.id.startsWith('trail_prop_') &&
+        !o.id.startsWith('curb_') &&
+        !o.id.startsWith('pin_bridge_')
+    );
     setTerrainData((prev) => ({
       ...prev,
       colors: cleanColors,
@@ -1336,7 +1342,7 @@ export default function App() {
       objects: nonTrailObjects,
       trailPoints: [],
     });
-    setToastMessage('🌿 Bekas cat jalan lama berhasil dibersihkan! Daratan kembali alami.');
+    setToastMessage('🌿 Bekas cat jalan & pembatas lama berhasil dibersihkan! Daratan kembali alami.');
     setTimeout(() => setToastMessage(null), 3500);
   }, [terrainData.heights, terrainConfig, placedObjects, pushHistory]);
 
@@ -1677,11 +1683,24 @@ export default function App() {
           sceneRef.current = scene;
           exportGroupRef.current = exportGroup;
         }}
-        onBakeNavigationRoute={(newHeights, newColors, newProps) => {
+        onBakeNavigationRoute={(newHeights, newColors, newProps, newPoints) => {
           handleTerrainBuffersChange(newHeights, newColors);
+          const combined = newProps.length > 0 ? [...placedObjects, ...newProps] : placedObjects;
           if (newProps.length > 0) {
-            setPlacedObjects((prev) => [...prev, ...newProps]);
+            setPlacedObjects(combined);
           }
+          let updatedTrailPoints = trailPoints;
+          if (newPoints && newPoints.length > 0) {
+            const mapped = newPoints.map((p) => ({ x: p[0], z: p[2] }));
+            updatedTrailPoints = [...trailPoints, ...mapped];
+            setTrailPoints(updatedTrailPoints);
+          }
+          pushHistory({
+            heights: new Float32Array(newHeights),
+            colors: new Float32Array(newColors),
+            objects: combined,
+            trailPoints: updatedTrailPoints,
+          });
         }}
         onToast={(msg) => {
           setToastMessage(msg);
@@ -1689,6 +1708,8 @@ export default function App() {
         }}
         isRoadBuilderActive={isRoadBuilderActive}
         onToggleRoadBuilder={handleToggleRoadBuilder}
+        cameraTouchMode={cameraTouchMode}
+        onCameraTouchModeChange={setCameraTouchMode}
       />
 
       {/* Top Navigation & Status Bar - Hidden during Fullscreen */}
@@ -1719,6 +1740,8 @@ export default function App() {
           onToggleFullscreen={handleToggleFullscreen}
           isRoadBuilderActive={isRoadBuilderActive}
           onToggleRoadBuilder={handleToggleRoadBuilder}
+          cameraTouchMode={cameraTouchMode}
+          onCameraTouchModeChange={setCameraTouchMode}
         />
       )}
 

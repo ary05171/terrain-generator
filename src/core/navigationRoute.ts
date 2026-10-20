@@ -499,6 +499,94 @@ export function bakeNavigationRouteToTerrain(
     }
   }
 
+  // Pasang batu pembatas paving dan rumput di tepian kurva jalan untuk menutupi tepian bergerigi
+  if (terrainConfig.trailEdgeDecoration !== false) {
+    let accumulatedDist = 0;
+    const curbStride = 3.8; // Interval antar blok pembatas
+    let nextCurbDist = 1.8;
+
+    const isNearObstacle = (px: number, pz: number) => {
+      return [...existingPlacedObjects, ...newProps].some((o) => {
+        const dist = Math.hypot(o.position[0] - px, o.position[2] - pz);
+        if (o.type === 'wooden_bridge') return dist < 4.2;
+        if (o.category === 'building') return dist < 3.8;
+        return false;
+      });
+    };
+
+    for (let i = 1; i < routePoints.length; i++) {
+      const prev = routePoints[i - 1];
+      const curr = routePoints[i];
+      const stepDist = Math.hypot(curr[0] - prev[0], curr[2] - prev[2]);
+      accumulatedDist += stepDist;
+
+      if (accumulatedDist >= nextCurbDist) {
+        nextCurbDist = accumulatedDist + curbStride;
+
+        // Jangan letakkan pembatas jika di bawah jembatan atau dalam air
+        if (curr[1] < waterLevel + 0.45) continue;
+
+        let tanX = curr[0] - prev[0];
+        let tanZ = curr[2] - prev[2];
+        if (i < routePoints.length - 1) {
+          tanX += routePoints[i + 1][0] - curr[0];
+          tanZ += routePoints[i + 1][2] - curr[2];
+        }
+        const len = Math.hypot(tanX, tanZ) || 1;
+        const uTanX = tanX / len;
+        const uTanZ = tanZ / len;
+
+        // Vektor normal tegak lurus arah kurva jalan
+        const nx = -uTanZ;
+        const nz = uTanX;
+        const curbOffset = trailWidth * 1.30;
+
+        const rotTangent = Math.atan2(uTanX, uTanZ);
+        const decoPattern = Math.floor(accumulatedDist / curbStride) % 4;
+
+        // Sisi Kiri
+        const lx = curr[0] + nx * curbOffset;
+        const lz = curr[2] + nz * curbOffset;
+        const ly = getSampledHeightAt(lx, lz, newHeights, size, res);
+        if (ly >= waterLevel + 0.38 && !isNearObstacle(lx, lz)) {
+          let leftType = 'path_curb_stones';
+          if (decoPattern === 0 || decoPattern === 2) leftType = 'path_curb_with_foliage';
+          else if (decoPattern === 3 && Math.floor(accumulatedDist) % 2 === 0) leftType = 'flower_patch';
+
+          newProps.push({
+            id: `curb_L_${Date.now()}_${i}_${Math.floor(accumulatedDist)}`,
+            name: leftType === 'flower_patch' ? 'Bunga Liar Tepi Jalan' : 'Batu Pembatas Paving',
+            type: leftType,
+            category: leftType === 'flower_patch' ? 'foliage' : 'path',
+            position: [lx, ly, lz],
+            rotation: [0, rotTangent, 0],
+            scale: leftType === 'flower_patch' ? [0.85, 0.85, 0.85] : [1, 1, 1],
+          });
+        }
+
+        // Sisi Kanan
+        const rx = curr[0] - nx * curbOffset;
+        const rz = curr[2] - nz * curbOffset;
+        const ry = getSampledHeightAt(rx, rz, newHeights, size, res);
+        if (ry >= waterLevel + 0.38 && !isNearObstacle(rx, rz)) {
+          let rightType = 'path_curb_with_foliage';
+          if (decoPattern === 0 || decoPattern === 2) rightType = 'path_curb_stones';
+          else if (decoPattern === 1 && Math.floor(accumulatedDist) % 2 === 0) rightType = 'meadow_grass';
+
+          newProps.push({
+            id: `curb_R_${Date.now()}_${i}_${Math.floor(accumulatedDist)}`,
+            name: rightType === 'meadow_grass' ? 'Rumput Padang Tepi Jalan' : 'Batu Pembatas Paving',
+            type: rightType,
+            category: rightType === 'meadow_grass' ? 'foliage' : 'path',
+            position: [rx, ry, rz],
+            rotation: [0, rotTangent + Math.PI, 0],
+            scale: rightType === 'meadow_grass' ? [0.85, 0.85, 0.85] : [1, 1, 1],
+          });
+        }
+      }
+    }
+  }
+
   return {
     newHeights,
     newColors,

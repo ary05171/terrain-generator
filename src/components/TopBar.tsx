@@ -11,9 +11,14 @@ import {
   Maximize2,
   Minimize2,
   Route,
+  RotateCw,
+  Move,
+  ZoomIn,
 } from 'lucide-react';
 import { BiomeType, GraphicsPreset, PerformanceMode, TimeOfDay } from '../types';
 import { formatTimeHour } from '../core/timeLighting';
+
+export type CameraTouchMode = 'rotate' | 'pan' | 'zoom';
 
 interface TopBarProps {
   seed: number;
@@ -42,6 +47,8 @@ interface TopBarProps {
   onToggleFullscreen?: () => void;
   isRoadBuilderActive?: boolean;
   onToggleRoadBuilder?: () => void;
+  cameraTouchMode?: CameraTouchMode;
+  onCameraTouchModeChange?: (mode: CameraTouchMode) => void;
 }
 
 export const TopBar: React.FC<TopBarProps> = ({
@@ -66,6 +73,8 @@ export const TopBar: React.FC<TopBarProps> = ({
   onToggleFullscreen,
   isRoadBuilderActive = false,
   onToggleRoadBuilder,
+  cameraTouchMode = 'rotate',
+  onCameraTouchModeChange,
 }) => {
   const effectivePreset =
     graphicsPreset ||
@@ -174,39 +183,60 @@ export const TopBar: React.FC<TopBarProps> = ({
         </div>
       </div>
 
-      {/* Cluster Kanan: Jalan 2 Titik, Jam & Waktu, Grafis/Resolusi, Fullscreen, Zen View */}
+      {/* Cluster Kanan: 3 Mode Kamera (Putar, Geser, Zoom), Jam, Fullscreen, Zen */}
       <div className="flex items-center gap-1 sm:gap-1.5 bg-slate-950/90 backdrop-blur-md border border-slate-800/80 rounded-2xl p-1 pointer-events-auto shadow-2xl shrink-0">
-        {/* Tombol Pembangun Jalan Dua Titik */}
-        {onToggleRoadBuilder && (
-          <button
-            type="button"
-            onClick={onToggleRoadBuilder}
-            className={`flex items-center gap-1 sm:gap-1.5 text-xs font-semibold px-2 sm:px-2.5 py-1.5 min-h-[36px] sm:min-h-[38px] rounded-xl border transition-all active:scale-95 shadow-sm cursor-pointer ${
-              isRoadBuilderActive
-                ? 'bg-gradient-to-r from-emerald-600 to-teal-500 text-white border-emerald-400 ring-2 ring-emerald-500/50 shadow-emerald-950/40'
-                : 'bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border-slate-700/60'
-            }`}
-            title={isRoadBuilderActive ? 'Tutup Pembangun Jalan Dua Titik (Pin A ⇄ B)' : 'Aktifkan Pembangun Jalan Dua Titik (Pin A ⇄ B)'}
-            aria-label="Pembangun Jalan 2 Titik"
-          >
-            <Route className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-            <span className="hidden sm:inline font-bold whitespace-nowrap">Jalan 2 Titik</span>
-            <span className="sm:hidden font-bold whitespace-nowrap text-[11px]">Jalan</span>
-            <span
-              className={`text-[9px] font-bold px-1 sm:px-1.5 py-0.2 rounded-full ${
-                isRoadBuilderActive ? 'bg-white/20 text-white' : 'bg-slate-800 text-slate-400'
+        {/* 3-Button Camera Mode Switch (Putar / Geser / Zoom) */}
+        {onCameraTouchModeChange && (
+          <div className="flex items-center bg-slate-900/90 border border-slate-700/80 rounded-xl p-0.5 shadow-inner">
+            <button
+              type="button"
+              onClick={() => onCameraTouchModeChange('rotate')}
+              className={`flex items-center gap-1 px-2 sm:px-2.5 py-1 min-h-[30px] rounded-lg text-[11px] sm:text-xs font-bold transition-all cursor-pointer ${
+                cameraTouchMode === 'rotate'
+                  ? 'bg-gradient-to-r from-emerald-500 to-teal-400 text-slate-950 shadow-md shadow-emerald-950/40'
+                  : 'text-slate-300 hover:text-white hover:bg-slate-800/70'
               }`}
+              title="Mode Putar: Sentuh 1 jari di layar untuk memutar kamera 360°"
             >
-              {isRoadBuilderActive ? 'ON' : 'OFF'}
-            </span>
-          </button>
+              <RotateCw className="w-3.5 h-3.5" />
+              <span>Putar</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => onCameraTouchModeChange('pan')}
+              className={`flex items-center gap-1 px-2 sm:px-2.5 py-1 min-h-[30px] rounded-lg text-[11px] sm:text-xs font-bold transition-all cursor-pointer ${
+                cameraTouchMode === 'pan'
+                  ? 'bg-gradient-to-r from-cyan-500 to-sky-400 text-slate-950 shadow-md shadow-cyan-950/40'
+                  : 'text-slate-300 hover:text-white hover:bg-slate-800/70'
+              }`}
+              title="Mode Geser: Sentuh 1 jari di layar untuk menggeser pulau (Pan)"
+            >
+              <Move className="w-3.5 h-3.5" />
+              <span>Geser</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => onCameraTouchModeChange('zoom')}
+              className={`flex items-center gap-1 px-2 sm:px-2.5 py-1 min-h-[30px] rounded-lg text-[11px] sm:text-xs font-bold transition-all cursor-pointer ${
+                cameraTouchMode === 'zoom'
+                  ? 'bg-gradient-to-r from-amber-500 to-yellow-400 text-slate-950 shadow-md shadow-amber-950/40'
+                  : 'text-slate-300 hover:text-white hover:bg-slate-800/70'
+              }`}
+              title="Mode Zoom: Sentuh 1 jari geser atas/bawah untuk zoom in/out"
+            >
+              <ZoomIn className="w-3.5 h-3.5" />
+              <span>Zoom</span>
+            </button>
+          </div>
         )}
 
         {/* Tombol Pintas Jam -> Buka Tab Waktu & Cahaya */}
         <button
           type="button"
           onClick={onOpenLightingTab}
-          className="flex items-center gap-1 sm:gap-1.5 text-xs font-semibold px-2 sm:px-2.5 py-1.5 min-h-[36px] sm:min-h-[38px] rounded-xl bg-slate-900/90 hover:bg-slate-800 text-slate-200 hover:text-white border border-amber-500/30 hover:border-amber-400/60 transition-all shadow-sm active:scale-95 shrink-0"
+          className="hidden xs:flex items-center gap-1 sm:gap-1.5 text-xs font-semibold px-2 sm:px-2.5 py-1 min-h-[30px] rounded-xl bg-slate-900/90 hover:bg-slate-800 text-slate-200 hover:text-white border border-amber-500/30 hover:border-amber-400/60 transition-all shadow-sm active:scale-95 shrink-0"
           title="Buka Tab Waktu & Cahaya (Siklus 24 Jam & Lampu)"
         >
           <Clock className="w-3.5 h-3.5 text-amber-400 shrink-0" />
@@ -217,12 +247,11 @@ export const TopBar: React.FC<TopBarProps> = ({
         <button
           type="button"
           onClick={onOpenGraphicsSettings}
-          className="hidden md:flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 min-h-[38px] rounded-xl bg-slate-900/90 hover:bg-slate-800 text-slate-200 hover:text-white border border-slate-700/60 hover:border-emerald-500/50 transition-all shadow-sm active:scale-95"
+          className="hidden md:flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 min-h-[30px] rounded-xl bg-slate-900/90 hover:bg-slate-800 text-slate-200 hover:text-white border border-slate-700/60 hover:border-emerald-500/50 transition-all shadow-sm active:scale-95"
           title={`Pengatur Grafis: ${effectivePreset} (${renderScale.toFixed(2)}x). Klik untuk ubah resolusi dan preset.`}
         >
           <Sliders className="w-3.5 h-3.5 text-emerald-400" />
           <span>{effectivePreset}</span>
-          <span className="font-mono text-[10px] text-slate-400">({renderScale.toFixed(2)}x)</span>
         </button>
 
         {/* Tombol Fullscreen */}
@@ -230,16 +259,15 @@ export const TopBar: React.FC<TopBarProps> = ({
           <button
             type="button"
             onClick={onToggleFullscreen}
-            className="flex items-center justify-center gap-1 text-xs font-semibold px-2 sm:px-2.5 py-1.5 min-h-[36px] min-w-[36px] sm:min-h-[38px] sm:min-w-[38px] rounded-xl bg-slate-900/90 hover:bg-emerald-950/40 text-slate-200 hover:text-white border border-slate-700/60 hover:border-emerald-500/60 transition-all shadow-sm active:scale-95 shrink-0"
+            className="flex items-center justify-center gap-1 text-xs font-semibold px-2 sm:px-2.5 py-1 min-h-[30px] min-w-[30px] rounded-xl bg-slate-900/90 hover:bg-emerald-950/40 text-slate-200 hover:text-white border border-slate-700/60 hover:border-emerald-500/60 transition-all shadow-sm active:scale-95 shrink-0"
             title={isFullscreen ? 'Keluar Mode Layar Penuh (Esc atau F)' : 'Mode Layar Penuh Fullscreen (F)'}
             aria-label="Toggle Fullscreen"
           >
             {isFullscreen ? (
-              <Minimize2 className="w-4 h-4 text-emerald-400" />
+              <Minimize2 className="w-3.5 h-3.5 text-emerald-400" />
             ) : (
-              <Maximize2 className="w-4 h-4 text-emerald-400" />
+              <Maximize2 className="w-3.5 h-3.5 text-emerald-400" />
             )}
-            <span className="hidden lg:inline">{isFullscreen ? 'Keluar' : 'Fullscreen'}</span>
           </button>
         )}
 
@@ -247,12 +275,11 @@ export const TopBar: React.FC<TopBarProps> = ({
         <button
           type="button"
           onClick={onToggleDock}
-          className="flex items-center justify-center gap-1 text-xs font-medium px-2 py-1.5 min-h-[36px] min-w-[36px] sm:min-h-[38px] sm:min-w-[38px] rounded-xl text-slate-400 hover:text-white hover:bg-slate-900 transition-colors active:scale-95 shrink-0"
+          className="flex items-center justify-center gap-1 text-xs font-medium px-2 py-1 min-h-[30px] min-w-[30px] rounded-xl text-slate-400 hover:text-white hover:bg-slate-900 transition-colors active:scale-95 shrink-0"
           title={isDockCollapsed ? 'Buka Menu Dock Bawah (H)' : 'Sembunyikan Menu Dock Bawah (H)'}
           aria-label="Toggle Dock UI"
         >
-          <Eye className="w-4 h-4 text-emerald-400" />
-          <span className="hidden xl:inline">{isDockCollapsed ? 'Tampil' : 'Zen'}</span>
+          <Eye className="w-3.5 h-3.5 text-emerald-400" />
         </button>
       </div>
     </header>

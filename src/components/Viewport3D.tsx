@@ -45,6 +45,10 @@ import {
   getBuildingDoorwayInfo,
   bakeNavigationRouteToTerrain,
 } from '../core/navigationRoute';
+import {
+  createCobblestoneRoadMaterial,
+  getClassicCobblestoneTexture,
+} from '../core/roadTextures';
 
 /**
  * Creates stylish low-poly 3D Pin Beacon Marker (Pin A in warm orange, Pin B in cyan)
@@ -124,8 +128,8 @@ export function createPinMarkerMesh(type: 'A' | 'B' | 'C'): THREE.Group {
   const flag = new THREE.Mesh(flagGeo, flagMat);
   group.add(flag);
 
-  // 6. Raycast hit target (invisible larger sphere for easy touch/mouse picking)
-  const hitTargetGeo = new THREE.SphereGeometry(2.4, 8, 6);
+  // 6. Raycast hit target (comfortable sphere for direct touch/mouse picking, non-interfering)
+  const hitTargetGeo = new THREE.SphereGeometry(1.35, 8, 6);
   const hitTargetMat = new THREE.MeshBasicMaterial({ visible: false });
   const hitTarget = new THREE.Mesh(hitTargetGeo, hitTargetMat);
   hitTarget.position.y = 2.0;
@@ -137,31 +141,29 @@ export function createPinMarkerMesh(type: 'A' | 'B' | 'C'): THREE.Group {
 }
 
 /**
- * Creates 3D Route Ribbon mesh linking Pin A to Pin B
+ * Creates 3D Route Ribbon mesh linking Pin A to Pin B with 2D Classic Cobblestone Texture
  */
 export function createRouteRibbonMesh(): THREE.Mesh {
   const geom = new THREE.BufferGeometry();
-  const mat = new THREE.MeshBasicMaterial({
-    color: 0x38bdf8,
-    transparent: true,
-    opacity: 0.9,
-    side: THREE.DoubleSide,
-    depthWrite: false,
-  });
+  const mat = createCobblestoneRoadMaterial({ opacity: 0.98, transparent: true });
   const mesh = new THREE.Mesh(geom, mat);
   mesh.name = 'NavigationRouteRibbon';
   mesh.renderOrder = 997;
+  mesh.receiveShadow = true;
   return mesh;
 }
 
 /**
- * Updates 3D ribbon geometry to conform to spline waypoints with smooth gradient
+ * Updates 3D ribbon geometry to conform to spline waypoints with smooth 2D cobblestone UV mapping
  */
 export function updateRouteRibbonGeometry(
   mesh: THREE.Mesh,
   points: [number, number, number][],
-  halfWidth = 0.45,
-  hasWaypointC = false
+  halfWidth = 1.15,
+  hasWaypointC = false,
+  heights?: Float32Array,
+  terrainSize?: number,
+  terrainRes?: number
 ) {
   if (points.length < 2) {
     mesh.visible = false;
@@ -172,24 +174,43 @@ export function updateRouteRibbonGeometry(
   const count = points.length;
   const verts = new Float32Array(count * 2 * 3);
   const colors = new Float32Array(count * 2 * 3);
+  const uvs = new Float32Array(count * 2 * 2);
   const indices: number[] = [];
 
-  const colorA = new THREE.Color(0xf97316); // Pin A: Orange
-  const colorB = new THREE.Color(0x06b6d4); // Pin B: Cyan
-  const colorC = new THREE.Color(0xa855f7); // Pin C: Purple
+  const colorA = new THREE.Color(0xfba264); // Warm amber tint near Pin A
+  const colorB = new THREE.Color(0x38bdf8); // Clean cyan tint near Pin B
+  const colorC = new THREE.Color(0xc084fc); // Purple beacon tint near Pin C
+  const colorNeutral = new THREE.Color(0xffffff); // Natural pure stone texture
   const curColor = new THREE.Color();
+
+  let accumulatedDist = 0;
 
   for (let i = 0; i < count; i++) {
     const pt = points[i];
+    if (i > 0) {
+      accumulatedDist += Math.hypot(pt[0] - points[i - 1][0], pt[2] - points[i - 1][2]);
+    }
+
     const alpha = i / (count - 1);
     if (hasWaypointC) {
-      if (alpha < 0.5) {
-        curColor.lerpColors(colorA, colorC, alpha * 2);
+      if (alpha < 0.15) {
+        curColor.lerpColors(colorA, colorNeutral, alpha / 0.15);
+      } else if (alpha > 0.42 && alpha < 0.58) {
+        const midT = 1.0 - Math.abs(alpha - 0.5) / 0.08;
+        curColor.lerpColors(colorNeutral, colorC, midT * 0.7);
+      } else if (alpha > 0.85) {
+        curColor.lerpColors(colorNeutral, colorB, (alpha - 0.85) / 0.15);
       } else {
-        curColor.lerpColors(colorC, colorB, (alpha - 0.5) * 2);
+        curColor.copy(colorNeutral);
       }
     } else {
-      curColor.lerpColors(colorA, colorB, alpha);
+      if (alpha < 0.18) {
+        curColor.lerpColors(colorA, colorNeutral, alpha / 0.18);
+      } else if (alpha > 0.82) {
+        curColor.lerpColors(colorNeutral, colorB, (alpha - 0.82) / 0.18);
+      } else {
+        curColor.copy(colorNeutral);
+      }
     }
 
     let tanX = 0;
@@ -206,21 +227,39 @@ export function updateRouteRibbonGeometry(
     const perpX = (-tanZ / len) * halfWidth;
     const perpZ = (tanX / len) * halfWidth;
 
+    const vCoord = accumulatedDist * 0.42;
+
+    const leftX = pt[0] + perpX;
+    const leftZ = pt[2] + perpZ;
+    const rightX = pt[0] - perpX;
+    const rightZ = pt[2] - perpZ;
+
+    let leftY = pt[1];
+    let rightY = pt[1];
+    if (heights && terrainSize && terrainRes) {
+      leftY = getSampledHeightAt(leftX, leftZ, heights, terrainSize, terrainRes);
+      rightY = getSampledHeightAt(rightX, rightZ, heights, terrainSize, terrainRes);
+    }
+
     const idxL = i * 2;
-    verts[idxL * 3] = pt[0] + perpX;
-    verts[idxL * 3 + 1] = pt[1] + 0.08;
-    verts[idxL * 3 + 2] = pt[2] + perpZ;
+    verts[idxL * 3] = leftX;
+    verts[idxL * 3 + 1] = leftY + 0.025; // Clings seamlessly to terrain surface
+    verts[idxL * 3 + 2] = leftZ;
     colors[idxL * 3] = curColor.r;
     colors[idxL * 3 + 1] = curColor.g;
     colors[idxL * 3 + 2] = curColor.b;
+    uvs[idxL * 2] = 0.0;
+    uvs[idxL * 2 + 1] = vCoord;
 
     const idxR = i * 2 + 1;
-    verts[idxR * 3] = pt[0] - perpX;
-    verts[idxR * 3 + 1] = pt[1] + 0.08;
-    verts[idxR * 3 + 2] = pt[2] - perpZ;
+    verts[idxR * 3] = rightX;
+    verts[idxR * 3 + 1] = rightY + 0.025; // Clings seamlessly to terrain surface
+    verts[idxR * 3 + 2] = rightZ;
     colors[idxR * 3] = curColor.r;
     colors[idxR * 3 + 1] = curColor.g;
     colors[idxR * 3 + 2] = curColor.b;
+    uvs[idxR * 2] = 1.0;
+    uvs[idxR * 2 + 1] = vCoord;
 
     if (i < count - 1) {
       indices.push(idxL, idxR, idxL + 2);
@@ -232,14 +271,279 @@ export function updateRouteRibbonGeometry(
   const newGeo = new THREE.BufferGeometry();
   newGeo.setAttribute('position', new THREE.BufferAttribute(verts, 3));
   newGeo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  newGeo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
   newGeo.setIndex(indices);
   newGeo.computeVertexNormals();
   mesh.geometry = newGeo;
   oldGeo.dispose();
 
-  if (mesh.material instanceof THREE.MeshBasicMaterial) {
-    mesh.material.vertexColors = true;
+  if (mesh.material && 'vertexColors' in mesh.material) {
+    (mesh.material as any).vertexColors = true;
     mesh.material.needsUpdate = true;
+  }
+}
+
+/**
+ * Creates group for the glowing dashed preview line and animated directional arrows
+ */
+export function createGlowingRoutePreviewGroup(): THREE.Group {
+  const group = new THREE.Group();
+  group.name = 'GlowingRoutePreviewGroup';
+  group.renderOrder = 998;
+
+  // 1. Dashed preview line ribbon mesh
+  const lineGeo = new THREE.BufferGeometry();
+  const lineMat = new THREE.MeshBasicMaterial({
+    vertexColors: true,
+    transparent: true,
+    opacity: 0.95,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  });
+  const lineMesh = new THREE.Mesh(lineGeo, lineMat);
+  lineMesh.name = 'preview_dashed_line';
+  group.add(lineMesh);
+
+  // 2. Directional arrows group
+  const arrowsGroup = new THREE.Group();
+  arrowsGroup.name = 'preview_directional_arrows';
+  group.add(arrowsGroup);
+
+  return group;
+}
+
+/**
+ * Shared chevron geometry in local XZ plane pointing towards +Z
+ */
+function createChevronArrowGeometry(): THREE.BufferGeometry {
+  const geo = new THREE.BufferGeometry();
+  // Chevron arrow coordinates in local XZ plane:
+  // Tip at front [0, 0, 0.75]
+  // Left wing tip [-0.55, 0, -0.45]
+  // Inner crotch [0, 0, -0.15]
+  // Right wing tip [0.55, 0, -0.45]
+  const vertices = new Float32Array([
+    // Triangle 1 (left wing)
+    0, 0, 0.75,
+    -0.55, 0, -0.45,
+    0, 0, -0.15,
+    // Triangle 2 (right wing)
+    0, 0, 0.75,
+    0, 0, -0.15,
+    0.55, 0, -0.45,
+  ]);
+  geo.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
+  geo.computeVertexNormals();
+  return geo;
+}
+
+const sharedChevronGeo = createChevronArrowGeometry();
+
+/**
+ * Updates the glowing dashed preview line and places directional arrows along spline points
+ */
+export function updateGlowingRoutePreview(
+  group: THREE.Group,
+  points: [number, number, number][],
+  hasWaypointC: boolean
+) {
+  if (points.length < 2) {
+    group.visible = false;
+    return;
+  }
+  group.visible = true;
+
+  const lineMesh = group.getObjectByName('preview_dashed_line') as THREE.Mesh;
+  const arrowsGroup = group.getObjectByName('preview_directional_arrows') as THREE.Group;
+
+  // Clear previous arrows
+  if (arrowsGroup) {
+    while (arrowsGroup.children.length > 0) {
+      const c = arrowsGroup.children[0];
+      arrowsGroup.remove(c);
+      if ((c as any).material) {
+        if (Array.isArray((c as any).material)) {
+          (c as any).material.forEach((m: any) => m.dispose());
+        } else {
+          (c as any).material.dispose();
+        }
+      }
+    }
+  }
+
+  // Calculate cumulative distances
+  const distances: number[] = [0];
+  let totalDist = 0;
+  for (let i = 1; i < points.length; i++) {
+    const d = Math.hypot(
+      points[i][0] - points[i - 1][0],
+      points[i][1] - points[i - 1][1],
+      points[i][2] - points[i - 1][2]
+    );
+    totalDist += d;
+    distances.push(totalDist);
+  }
+
+  // 1. Build Dashed Ribbon Geometry (dashLength 1.4m, gap 0.85m -> cycle 2.25m)
+  const dashLength = 1.4;
+  const cycleLength = 2.25;
+  const halfWidth = 0.34;
+
+  const verts: number[] = [];
+  const colors: number[] = [];
+  const indices: number[] = [];
+  let vertIndex = 0;
+
+  const colorA = new THREE.Color(0xf97316); // Bright Amber/Orange at Pin A
+  const colorB = new THREE.Color(0x38bdf8); // Bright Cyan at Pin B
+  const colorC = new THREE.Color(0xc084fc); // Vibrant Purple at Pin C
+  const colorMid = new THREE.Color(0x34d399); // Emerald Green mid-segment
+  const curColor = new THREE.Color();
+
+  const getColorAtAlpha = (alpha: number) => {
+    if (hasWaypointC) {
+      if (alpha < 0.2) {
+        return curColor.lerpColors(colorA, colorMid, alpha / 0.2);
+      } else if (alpha < 0.5) {
+        return curColor.lerpColors(colorMid, colorC, (alpha - 0.2) / 0.3);
+      } else if (alpha < 0.8) {
+        return curColor.lerpColors(colorC, colorMid, (alpha - 0.5) / 0.3);
+      } else {
+        return curColor.lerpColors(colorMid, colorB, (alpha - 0.8) / 0.2);
+      }
+    } else {
+      if (alpha < 0.35) {
+        return curColor.lerpColors(colorA, colorMid, alpha / 0.35);
+      } else {
+        return curColor.lerpColors(colorMid, colorB, (alpha - 0.35) / 0.65);
+      }
+    }
+  };
+
+  let isInsideDash = false;
+
+  for (let i = 0; i < points.length; i++) {
+    const pt = points[i];
+    const dist = distances[i];
+    const alpha = totalDist > 0 ? dist / totalDist : 0;
+    const modDist = dist % cycleLength;
+    const inDash = modDist <= dashLength;
+
+    let tanX = 0;
+    let tanZ = 0;
+    if (i < points.length - 1) {
+      tanX += points[i + 1][0] - pt[0];
+      tanZ += points[i + 1][2] - pt[2];
+    }
+    if (i > 0) {
+      tanX += pt[0] - points[i - 1][0];
+      tanZ += pt[2] - points[i - 1][2];
+    }
+    const len = Math.hypot(tanX, tanZ) || 1;
+    const normX = -tanZ / len;
+    const normZ = tanX / len;
+
+    const col = getColorAtAlpha(alpha);
+
+    if (inDash) {
+      const elevation = pt[1] + 0.12; // Slightly elevated above terrain to prevent z-fighting
+      verts.push(
+        pt[0] + normX * halfWidth, elevation, pt[2] + normZ * halfWidth,
+        pt[0] - normX * halfWidth, elevation, pt[2] - normZ * halfWidth
+      );
+      colors.push(
+        col.r, col.g, col.b,
+        col.r, col.g, col.b
+      );
+
+      if (isInsideDash) {
+        const vL = vertIndex;
+        const vR = vertIndex + 1;
+        const prevL = vertIndex - 2;
+        const prevR = vertIndex - 1;
+
+        indices.push(prevL, prevR, vL);
+        indices.push(prevR, vR, vL);
+      }
+      vertIndex += 2;
+      isInsideDash = true;
+    } else {
+      isInsideDash = false;
+    }
+  }
+
+  if (lineMesh) {
+    const oldGeo = lineMesh.geometry;
+    const newGeo = new THREE.BufferGeometry();
+    newGeo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+    newGeo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+    newGeo.setIndex(indices);
+    newGeo.computeVertexNormals();
+    lineMesh.geometry = newGeo;
+    oldGeo.dispose();
+  }
+
+  // 2. Place Directional Arrows along the route (every ~4.2 meters)
+  if (arrowsGroup) {
+    const arrowStride = 4.2;
+    let nextArrowDist = 2.0;
+
+    for (let i = 1; i < points.length - 1; i++) {
+      const dist = distances[i];
+      if (dist >= nextArrowDist && dist <= totalDist - 1.5) {
+        nextArrowDist = dist + arrowStride;
+
+        const pt = points[i];
+        const nextPt = points[i + 1];
+        const prevPt = points[i - 1];
+
+        const tanX = nextPt[0] - prevPt[0];
+        const tanZ = nextPt[2] - prevPt[2];
+        const headingAngle = Math.atan2(tanX, tanZ);
+
+        const alpha = totalDist > 0 ? dist / totalDist : 0;
+        const col = getColorAtAlpha(alpha);
+
+        const arrowMat = new THREE.MeshBasicMaterial({
+          color: col,
+          transparent: true,
+          opacity: 0.92,
+          side: THREE.DoubleSide,
+          depthWrite: false,
+        });
+
+        const arrowMesh = new THREE.Mesh(sharedChevronGeo, arrowMat);
+        arrowMesh.position.set(pt[0], pt[1] + 0.16, pt[2]);
+        arrowMesh.rotation.y = headingAngle;
+        arrowMesh.scale.set(0.85, 0.85, 0.85);
+        (arrowMesh as any).userData = {
+          baseY: pt[1] + 0.16,
+          distOnRoute: dist,
+        };
+
+        arrowsGroup.add(arrowMesh);
+      }
+    }
+  }
+}
+
+/**
+ * Traveling wave animation for glowing directional arrows
+ */
+export function animateGlowingRoutePreview(group: THREE.Group, time: number) {
+  const arrowsGroup = group.getObjectByName('preview_directional_arrows') as THREE.Group;
+  if (!arrowsGroup || arrowsGroup.children.length === 0) return;
+
+  for (let i = 0; i < arrowsGroup.children.length; i++) {
+    const arrow = arrowsGroup.children[i] as THREE.Mesh;
+    const distOnRoute = (arrow as any).userData?.distOnRoute || i * 4.0;
+    const wave = (Math.sin(time * 5.0 - distOnRoute * 0.45) + 1.0) * 0.5;
+    const scale = 0.85 + 0.16 * wave;
+    arrow.scale.set(scale, scale, scale);
+
+    if (arrow.material && 'opacity' in arrow.material) {
+      (arrow.material as THREE.MeshBasicMaterial).opacity = 0.55 + 0.42 * wave;
+    }
   }
 }
 
@@ -451,7 +755,12 @@ interface Viewport3DProps {
   onAddTrailPoint?: (pt: { x: number; z: number }) => void;
   onFpsUpdate?: (fps: number) => void;
   onSceneReady?: (scene: THREE.Scene, exportGroup: THREE.Group) => void;
-  onBakeNavigationRoute?: (newHeights: Float32Array, newColors: Float32Array, newProps: PlacedObject[]) => void;
+  onBakeNavigationRoute?: (
+    newHeights: Float32Array,
+    newColors: Float32Array,
+    newProps: PlacedObject[],
+    routePoints?: [number, number, number][]
+  ) => void;
   onToast?: (msg: string) => void;
   isRoadBuilderActive?: boolean;
   onToggleRoadBuilder?: () => void;
@@ -648,7 +957,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   const [showAStarNodes, setShowAStarNodes] = useState<boolean>(true);
   const [pinABoundId, setPinABoundId] = useState<string | null>(null);
   const [pinBBoundId, setPinBBoundId] = useState<string | null>(null);
-  const [cameraFollowActive, setCameraFollowActive] = useState<boolean>(true);
+  const [cameraFollowActive, setCameraFollowActive] = useState<boolean>(false);
   const [isPinNavVisible, setIsPinNavVisible] = useState<boolean>(true);
   const [nearbyBuilding, setNearbyBuilding] = useState<PlacedObject | null>(null);
   const [routeDetails, setRouteDetails] = useState<{
@@ -668,6 +977,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   });
   const [isMinimized, setIsMinimized] = useState<boolean>(() => typeof window !== 'undefined' && window.innerWidth < 768);
   const [forceRoadNavVisible, setForceRoadNavVisible] = useState<boolean>(false);
+  const [roadBuildCount, setRoadBuildCount] = useState<number>(0);
 
   // Road Build Mode: active if user toggled road builder, or selected a path category item, or path sculpt tool
   const isRoadModeActive =
@@ -684,7 +994,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   const showAStarNodesRef = useRef<boolean>(true);
   const pinABoundIdRef = useRef<string | null>(null);
   const pinBBoundIdRef = useRef<string | null>(null);
-  const cameraFollowActiveRef = useRef<boolean>(true);
+  const cameraFollowActiveRef = useRef<boolean>(false);
   const draggingPinRef = useRef<'A' | 'B' | 'C' | null>(null);
   const navGroupRef = useRef<THREE.Group | null>(null);
   const pinAGroupRef = useRef<THREE.Group | null>(null);
@@ -692,6 +1002,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   const pinCGroupRef = useRef<THREE.Group | null>(null);
   const aStarGroupRef = useRef<THREE.Group | null>(null);
   const routeRibbonRef = useRef<THREE.Mesh | null>(null);
+  const routePreviewGroupRef = useRef<THREE.Group | null>(null);
   const currentRoutePointsRef = useRef<[number, number, number][]>([]);
 
   // Scene object refs
@@ -702,6 +1013,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   const terrainMeshRef = useRef<THREE.Mesh | null>(null);
   const waterMeshRef = useRef<THREE.Mesh | null>(null);
   const objectsGroupRef = useRef<THREE.Group | null>(null);
+  const persistentRoadGroupRef = useRef<THREE.Group | null>(null);
   const exportGroupRef = useRef<THREE.Group | null>(null);
   const brushRingRef = useRef<THREE.LineLoop | null>(null);
   const ghostPreviewRef = useRef<THREE.Group | null>(null);
@@ -1041,6 +1353,12 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     exportGroup.add(objectsGroup);
     objectsGroupRef.current = objectsGroup;
 
+    // 10b. Permanent Baked Road Meshes Group with 2D Classic Cobblestone Texture
+    const persistentRoadGroup = new THREE.Group();
+    persistentRoadGroup.name = 'PersistentRoadGroup';
+    exportGroup.add(persistentRoadGroup);
+    persistentRoadGroupRef.current = persistentRoadGroup;
+
     // 11. Brush Ring Indicator
     const ringSegments = 48;
     const ringPoints: THREE.Vector3[] = [];
@@ -1103,9 +1421,16 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     navGroup.add(aStarGroup);
     aStarGroupRef.current = aStarGroup;
 
+    // Real 3D cobblestone ribbon is kept hidden in preview mode until user clicks "Bangun Jalan"
     const routeRibbon = createRouteRibbonMesh();
+    routeRibbon.visible = false;
     navGroup.add(routeRibbon);
     routeRibbonRef.current = routeRibbon;
+
+    // Glowing dashed route line with directional arrows preview
+    const routePreviewGroup = createGlowingRoutePreviewGroup();
+    navGroup.add(routePreviewGroup);
+    routePreviewGroupRef.current = routePreviewGroup;
 
     // Notify parent
     if (onSceneReady) {
@@ -1354,29 +1679,9 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         if (ringC) ringC.scale.set(beaconPulse, beaconPulse, beaconPulse);
       }
 
-      // Smooth Camera Follow Pin when enabled or being dragged
-      if (
-        cameraFollowActiveRef.current &&
-        (draggingPinRef.current || isMouseDownRef.current) &&
-        controlsRef.current &&
-        cameraRef.current
-      ) {
-        const activePos =
-          activePinIdRef.current === 'A'
-            ? pinAPosRef.current
-            : activePinIdRef.current === 'B'
-            ? pinBPosRef.current
-            : pinCPosRef.current;
-        const targetPos = new THREE.Vector3(activePos[0], activePos[1] + 1.2, activePos[2]);
-        controlsRef.current.target.lerp(targetPos, 0.06);
-
-        const camDist = cameraRef.current.position.distanceTo(controlsRef.current.target);
-        if (camDist > 85) {
-          cameraRef.current.position.lerp(
-            targetPos.clone().add(cameraRef.current.position.clone().sub(targetPos).normalize().multiplyScalar(60)),
-            0.04
-          );
-        }
+      // Animate glowing dashed route preview & directional arrows traveling wave
+      if (routePreviewGroupRef.current && routePreviewGroupRef.current.visible) {
+        animateGlowingRoutePreview(routePreviewGroupRef.current, elapsed);
       }
 
       renderer.render(scene, camera);
@@ -2054,7 +2359,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       if (id === 'A' || id === 'B' || id === 'C') return id;
     }
 
-    // 3D proximity fallback
+    // 3D proximity fallback (strictly within 1.1 units so normal camera drag is never blocked)
     const pt = getTerrainIntersection(clientX, clientY);
     if (pt) {
       const dA = Math.hypot(pt.x - pinAPosRef.current[0], pt.z - pinAPosRef.current[2]);
@@ -2063,9 +2368,9 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         ? Math.hypot(pt.x - pinCPosRef.current[0], pt.z - pinCPosRef.current[2])
         : Infinity;
 
-      if (dC < 4.8 && dC <= dA && dC <= dB) return 'C';
-      if (dA < 4.8 && dA <= dB) return 'A';
-      if (dB < 4.8 && dB < dA) return 'B';
+      if (dC < 1.1 && dC <= dA && dC <= dB) return 'C';
+      if (dA < 1.1 && dA <= dB) return 'A';
+      if (dB < 1.1 && dB < dA) return 'B';
     }
 
     return null;
@@ -2094,13 +2399,18 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
 
     currentRoutePointsRef.current = result.points;
 
-    if (routeRibbonRef.current) {
-      updateRouteRibbonGeometry(
-        routeRibbonRef.current,
+    // 1. Update Glowing Dashed Line & Directional Arrows Preview
+    if (routePreviewGroupRef.current) {
+      updateGlowingRoutePreview(
+        routePreviewGroupRef.current,
         result.points,
-        0.44,
         hasWaypointCRef.current
       );
+    }
+
+    // 2. Real cobblestone road ribbon is hidden during preview mode (until user taps build)
+    if (routeRibbonRef.current) {
+      routeRibbonRef.current.visible = false;
     }
 
     if (aStarGroupRef.current) {
@@ -2420,8 +2730,22 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       placedObjects
     );
 
+    // Membuat mesh jalan paving 2D cobblestone permanen yang menempel mulus di atas kontur tanah
+    if (persistentRoadGroupRef.current) {
+      const bakedMesh = createRouteRibbonMesh();
+      bakedMesh.name = `PermanentRoadRibbon_${Date.now()}`;
+      const roadWidth = (terrainConfig.trailWidth ?? 2.2) * 0.52;
+      updateRouteRibbonGeometry(bakedMesh, [...currentRoutePointsRef.current], roadWidth, false);
+      persistentRoadGroupRef.current.add(bakedMesh);
+    }
+
     if (onBakeNavigationRoute) {
-      onBakeNavigationRoute(result.newHeights, result.newColors, result.newProps);
+      onBakeNavigationRoute(
+        result.newHeights,
+        result.newColors,
+        result.newProps,
+        currentRoutePointsRef.current
+      );
     } else {
       if (onTerrainBuffersChange) {
         onTerrainBuffersChange(result.newHeights, result.newColors);
@@ -2429,8 +2753,10 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       result.newProps.forEach((p) => onObjectPlaced?.(p));
     }
 
+    setRoadBuildCount((prev) => prev + 1);
+
     if (onToast) {
-      onToast('🚶‍♂️ Jalur Pin A ⇄ B berhasil diterapkan menjadi jalan setapak permanen!');
+      onToast('✨ Jalan paving batu alam cobblestone & pembatas paving berhasil dibangun!');
     }
   };
 
@@ -2610,20 +2936,6 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       const pt = getTerrainIntersection(e.clientX, e.clientY);
       if (pt) {
         updatePinPosition(pinId, pt.x, pt.z);
-
-        // Dynamic Camera Follow & Auto-Zoom if Pin is moving or far away
-        if (cameraFollowActiveRef.current && controlsRef.current && cameraRef.current) {
-          const target = controlsRef.current.target;
-          target.lerp(new THREE.Vector3(pt.x, pt.y + 1.2, pt.z), 0.20);
-          controlsRef.current.update();
-
-          const cam = cameraRef.current;
-          const dist = cam.position.distanceTo(target);
-          if (dist > 52) {
-            const forward = new THREE.Vector3().subVectors(cam.position, target).normalize();
-            cam.position.lerp(target.clone().add(forward.multiplyScalar(36)), 0.14);
-          }
-        }
       }
       return;
     }
@@ -2941,8 +3253,8 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         <div className="absolute left-2.5 sm:left-4 top-14 sm:top-18 z-40 pointer-events-auto">
           <div className="flex items-center gap-1.5 sm:gap-2 bg-slate-950/90 backdrop-blur-md border border-slate-700/80 rounded-2xl px-2.5 sm:px-3.5 py-1.5 shadow-2xl text-xs">
             <div className="flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
-              <span className="font-semibold text-slate-200">Pin {hasWaypointC ? 'A-C-B' : 'A ⇄ B'}</span>
+              <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-pulse" />
+              <span className="font-semibold text-slate-200">Pratinjau {hasWaypointC ? 'A-C-B' : 'A ⇄ B'}</span>
             </div>
             <span className="text-slate-400 font-mono text-[11px]">~{routeDetails.lengthMeters}m</span>
             {routeDetails.isDetoured ? (
@@ -2957,16 +3269,16 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
             <button
               type="button"
               onClick={handleBakeRoute}
-              className="flex items-center gap-1 px-2.5 py-1 min-h-[32px] rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white font-bold text-[11px] shadow-sm active:scale-95 cursor-pointer ml-0.5"
-              title="Terapkan rute navigasi menjadi jalan paving permanen"
+              className="flex items-center gap-1 px-2.5 py-1 min-h-[30px] rounded-xl bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-400 hover:from-emerald-400 hover:to-teal-300 text-slate-950 font-bold text-[11px] shadow-sm active:scale-95 cursor-pointer ml-0.5"
+              title="Bangun jalan batu alam cobblestone & pembatas paving permanen sekarang"
             >
-              <Footprints className="w-3.5 h-3.5" />
-              <span>Jalan</span>
+              <Footprints className="w-3.5 h-3.5 text-slate-950" />
+              <span>Bangun Jalan</span>
             </button>
             <button
               type="button"
               onClick={() => setIsMinimized(false)}
-              className="p-1 min-h-[32px] min-w-[32px] flex items-center justify-center rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+              className="p-1 min-h-[30px] min-w-[30px] flex items-center justify-center rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
               title="Buka panel navigasi lengkap"
               aria-label="Expand Navigation Panel"
             >
@@ -2984,8 +3296,8 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
                   <Route className="w-4 h-4" />
                 </div>
                 <div>
-                  <h3 className="text-xs font-bold text-white tracking-wide">Navigasi Cerdas Pin A ⇄ B</h3>
-                  <p className="text-[10px] text-slate-400 leading-tight">Penghindaran Rintangan & Bind Pintu</p>
+                  <h3 className="text-xs font-bold text-white tracking-wide">Pembangun Jalan (Pin A ⇄ B)</h3>
+                  <p className="text-[10px] text-cyan-400 leading-tight">Pratinjau Garis Glowing & Panah Arah</p>
                 </div>
               </div>
 
@@ -3010,6 +3322,17 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
                 >
                   <ChevronUp className="w-4 h-4" />
                 </button>
+              </div>
+            </div>
+
+            {/* Preview Banner: Glowing dashed line indicator */}
+            <div className="bg-gradient-to-r from-sky-950/70 to-emerald-950/50 border border-sky-500/35 rounded-xl p-2.5 flex items-start gap-2 shadow-inner">
+              <span className="text-cyan-400 text-sm mt-0.5 shrink-0">✨</span>
+              <div className="text-[11px] leading-tight">
+                <p className="font-bold text-cyan-200">Mode Pratinjau Garis Glowing Aktif</p>
+                <p className="text-slate-300 mt-0.5">
+                  Di viewport hanya muncul garis putus-putus & panah arah. Tekan <strong className="text-emerald-300">Bangun Jalan</strong> untuk menerapkan tekstur paving batu alam 2D & pembatas batu.
+                </p>
               </div>
             </div>
 
@@ -3150,34 +3473,26 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
               )}
             </div>
 
-            {/* Camera Tracking & Touch Controls */}
-            <div className="flex items-center justify-between gap-2 p-2 rounded-xl bg-slate-900/60 border border-slate-800/80">
-              <button
-                type="button"
-                onClick={toggleCameraFollow}
-                className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
-                  cameraFollowActive
-                    ? 'bg-emerald-500/25 text-emerald-300 border border-emerald-500/50'
-                    : 'bg-slate-800 text-slate-400 border border-slate-700 hover:text-slate-200'
-                }`}
-                title="Kamera otomatis mengikuti posisi Pin aktif saat digeser"
-              >
-                <Target className="w-3.5 h-3.5" />
-                <span>Kamera Ikuti Pin: {cameraFollowActive ? 'ON' : 'OFF'}</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => focusCameraOnPin(activePinId, true)}
-                className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium border border-slate-700 transition-all cursor-pointer flex items-center gap-1 active:scale-95"
-                title="Pusatkan dan dekatkan kamera ke Pin aktif"
-              >
-                <span>Dekatkan</span>
-              </button>
-            </div>
-
-            <div className="text-[10px] text-slate-400 leading-snug px-0.5">
-              💡 <em>Sentuh & seret Pin A atau B langsung di layar 3D tanpa tombol analog. Kamera otomatis mengikuti & mendekat jika area menjauh.</em>
+            {/* Camera Tracking & Touch Controls - 100% Free Camera */}
+            <div className="flex flex-col gap-1.5 p-2 rounded-xl bg-slate-900/60 border border-slate-800/80">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                  <span className="text-[11px] font-bold text-slate-200">Kamera Bebas (OrbitControls)</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => focusCameraOnPin(activePinId, true)}
+                  className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] font-medium border border-slate-700 transition-all cursor-pointer flex items-center gap-1 active:scale-95"
+                  title="Pusatkan kamera ke Pin aktif"
+                >
+                  <Target className="w-3 h-3 text-emerald-400" />
+                  <span>Pusatkan Pin {activePinId}</span>
+                </button>
+              </div>
+              <div className="text-[10.5px] text-slate-400 leading-snug">
+                🎮 <em>Kamera 100% bebas bergerak tanpa auto-lock. Putar, geser & zoom kapan saja di mana pun.</em>
+              </div>
             </div>
 
             {/* Action Buttons Row */}
@@ -3185,8 +3500,8 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
               <button
                 type="button"
                 onClick={handleResetPins}
-                className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-xs font-semibold transition-all active:scale-95 cursor-pointer"
-                title="Kembalikan Pin A dan B ke posisi default di kedua ujung pulau"
+                className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-xs font-semibold transition-all active:scale-95 cursor-pointer"
+                title="Kembalikan Pin A dan B ke posisi default"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
                 <span>Reset Pin</span>
@@ -3195,11 +3510,11 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
               <button
                 type="button"
                 onClick={handleBakeRoute}
-                className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white shadow-lg shadow-emerald-950/40 text-xs font-bold transition-all active:scale-95 cursor-pointer"
-                title="Cetak rute ini menjadi jalan setapak paving permanen dan pasang jembatan kayu jika melintasi air"
+                className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-400 hover:from-emerald-400 hover:to-teal-300 text-slate-950 shadow-lg shadow-emerald-500/25 text-xs font-bold transition-all active:scale-95 cursor-pointer"
+                title="Bangun jalan batu alam cobblestone asli dengan pembatas batu paving dan rumput di tepian kurva"
               >
-                <Footprints className="w-3.5 h-3.5" />
-                <span>Terapkan Jalan</span>
+                <Footprints className="w-4 h-4 text-slate-950 stroke-[2.5]" />
+                <span>Bangun Jalan</span>
               </button>
             </div>
           </div>
