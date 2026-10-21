@@ -1896,17 +1896,15 @@ export function findAStarPath(
 
       for (const obs of activeObstacles) {
         const d = Math.hypot(nextWx - obs.x, nextWz - obs.z);
-        // If close to doorway pin endpoint, allow entrance threshold
-        if (distToEnd < 2.4 || distToStart < 2.4) {
-          continue;
-        }
+        const isDoorwayAllowed = obs.id && ignoreIds.has(obs.id);
+        const minClearance = isDoorwayAllowed ? obs.radius * 0.75 : obs.radius + 1.2;
 
-        if (d < obs.radius + 1.2) {
+        if (d < minClearance) {
           isBlocked = true;
           avoidedObstacleIds.add(obs.id || `${obs.x}_${obs.z}`);
           break;
-        } else if (d < obs.radius + 2.5) {
-          wallPenalty += (obs.radius + 2.5 - d) * 3.5;
+        } else if (d < obs.radius + 3.2) {
+          wallPenalty += (obs.radius + 3.2 - d) * 4.5;
         }
       }
 

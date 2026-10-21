@@ -1,5 +1,48 @@
 import * as THREE from 'three';
+import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { PaletteItem, FarmPlotStage } from '../types';
+
+/**
+ * High-performance geometry consolidation helper.
+ * Combines multiple transformed geometries into a single non-indexed BufferGeometry.
+ * Drastically reduces draw calls for vegetation clumps, curbs, and composite props.
+ */
+export function mergeGeometriesWithTransforms(
+  items: {
+    geometry: THREE.BufferGeometry;
+    position?: [number, number, number];
+    rotation?: [number, number, number];
+    scale?: [number, number, number];
+  }[]
+): THREE.BufferGeometry {
+  if (items.length === 0) return new THREE.BufferGeometry();
+  const matrix = new THREE.Matrix4();
+  const pos = new THREE.Vector3();
+  const rot = new THREE.Euler();
+  const quat = new THREE.Quaternion();
+  const scl = new THREE.Vector3();
+
+  const prepared: THREE.BufferGeometry[] = [];
+
+  for (const item of items) {
+    const geo = item.geometry.index ? item.geometry.toNonIndexed() : item.geometry.clone();
+    pos.set(...(item.position || [0, 0, 0]));
+    rot.set(...(item.rotation || [0, 0, 0]));
+    quat.setFromEuler(rot);
+    scl.set(...(item.scale || [1, 1, 1]));
+    matrix.compose(pos, quat, scl);
+    geo.applyMatrix4(matrix);
+    prepared.push(geo);
+  }
+
+  const merged = BufferGeometryUtils.mergeGeometries(prepared, false);
+  prepared.forEach((g) => g.dispose());
+  if (merged) {
+    merged.computeVertexNormals();
+    return merged;
+  }
+  return new THREE.BufferGeometry();
+}
 
 // Pre-create reusable contact shadow texture & material
 let contactShadowTexture: THREE.CanvasTexture | null = null;
@@ -13,6 +56,7 @@ function getContactShadowTexture(): THREE.CanvasTexture {
   canvas.width = 64; // lightweight 64x64 on mobile
   canvas.height = 64;
   const ctx = canvas.getContext('2d')!;
+  ctx.clearRect(0, 0, 64, 64);
 
   const gradient = ctx.createRadialGradient(32, 32, 5, 32, 32, 30);
   gradient.addColorStop(0, 'rgba(0, 0, 0, 0.65)');
@@ -504,305 +548,181 @@ export function createBroadleafTree(): THREE.Group {
   return group;
 }
 
+let cachedMeadowGrassBladeGeo: THREE.BufferGeometry | null = null;
+let cachedMeadowGrassSeedGeo: THREE.BufferGeometry | null = null;
+
 /**
- * 4b. Stylized Meadow Wild Grass (Rumput Padang Asli)
- * Built with 32+ slender blades arranged organically:
- * - Upright tall blades in center (tegak)
- * - Radially slanted arching blades (serong acak)
- * - Tapered low-poly geometries with rich botanical hue variations
- * - Delicate wild seedhead spikes
+ * 4b. Stylized Meadow Wild Grass (Rumput Padang Asli - Merged High Performance)
+ * Consolidates all grass blades and seedhead spikes into 2 single draw calls.
  */
 export function createMeadowGrass(): THREE.Group {
   const group = new THREE.Group();
   group.name = 'meadow_grass';
   group.userData = { isWindFoliage: true };
 
-  // Natural botanical color spectrum for lush meadow grass
-  const matForest = createMobileMat({ color: 0x15803d, roughness: 0.65 });
   const matLush = createMobileMat({ color: 0x16a34a, roughness: 0.60 });
-  const matEmerald = createMobileMat({ color: 0x22c55e, roughness: 0.60 });
-  const matSpring = createMobileMat({ color: 0x4ade80, roughness: 0.58 });
-  const matLime = createMobileMat({ color: 0x84cc16, roughness: 0.55 });
-  const matGolden = createMobileMat({ color: 0xa3e635, roughness: 0.55 });
-  const matSeed = createMobileMat({ color: 0xd97706, roughness: 0.50 }); // warm seed tip
+  const matSeed = createMobileMat({ color: 0xd97706, roughness: 0.50 });
 
-  // Slender 3-sided tapered grass blade geometries (ultra-fast, precomputed non-indexed normals)
-  const bladeTallGeo = makeFlatShadedGeo(new THREE.ConeGeometry(0.045, 1.35, 3));
-  const bladeMedGeo = makeFlatShadedGeo(new THREE.ConeGeometry(0.040, 1.05, 3));
-  const bladeShortGeo = makeFlatShadedGeo(new THREE.ConeGeometry(0.035, 0.75, 3));
-  const bladeTinyGeo = makeFlatShadedGeo(new THREE.ConeGeometry(0.030, 0.50, 3));
-  const seedHeadGeo = makeFlatShadedGeo(new THREE.ConeGeometry(0.06, 0.35, 4));
+  if (!cachedMeadowGrassBladeGeo) {
+    const bladeTallGeo = makeFlatShadedGeo(new THREE.ConeGeometry(0.045, 1.35, 3));
+    const bladeMedGeo = makeFlatShadedGeo(new THREE.ConeGeometry(0.040, 1.05, 3));
+    const bladeShortGeo = makeFlatShadedGeo(new THREE.ConeGeometry(0.035, 0.75, 3));
+    const bladeTinyGeo = makeFlatShadedGeo(new THREE.ConeGeometry(0.030, 0.50, 3));
 
-  // Organic cluster: Center upright (tegak), mid-tier slanted (serong), outer low fringe
-  const bladeList: {
-    geo: THREE.BufferGeometry;
-    mat: THREE.Material;
-    x: number;
-    z: number;
-    rotX: number;
-    rotZ: number;
-    rotY: number;
-    scaleY: number;
-  }[] = [
-    // 1. Central Core - Tegak (Upright & Tall)
-    { geo: bladeTallGeo, mat: matForest, x: 0.02, z: -0.01, rotX: 0.04, rotZ: 0.03, rotY: 0.2, scaleY: 1.15 },
-    { geo: bladeTallGeo, mat: matLush, x: -0.04, z: 0.03, rotX: -0.05, rotZ: 0.04, rotY: 1.1, scaleY: 1.20 },
-    { geo: bladeTallGeo, mat: matEmerald, x: 0.06, z: 0.04, rotX: 0.06, rotZ: -0.05, rotY: 2.3, scaleY: 1.10 },
-    { geo: bladeTallGeo, mat: matSpring, x: -0.03, z: -0.05, rotX: -0.04, rotZ: -0.06, rotY: 3.4, scaleY: 1.05 },
-    { geo: bladeMedGeo, mat: matLime, x: 0.00, z: 0.07, rotX: 0.09, rotZ: 0.02, rotY: 4.5, scaleY: 1.00 },
+    const rawBlades = [
+      { geo: bladeTallGeo, x: 0.02, z: -0.01, rotX: 0.04, rotZ: 0.03, rotY: 0.2, scaleY: 1.15, h: 1.35 },
+      { geo: bladeTallGeo, x: -0.04, z: 0.03, rotX: -0.05, rotZ: 0.04, rotY: 1.1, scaleY: 1.20, h: 1.35 },
+      { geo: bladeTallGeo, x: 0.06, z: 0.04, rotX: 0.06, rotZ: -0.05, rotY: 2.3, scaleY: 1.10, h: 1.35 },
+      { geo: bladeTallGeo, x: -0.03, z: -0.05, rotX: -0.04, rotZ: -0.06, rotY: 3.4, scaleY: 1.05, h: 1.35 },
+      { geo: bladeMedGeo, x: 0.00, z: 0.07, rotX: 0.09, rotZ: 0.02, rotY: 4.5, scaleY: 1.00, h: 1.05 },
+      { geo: bladeMedGeo, x: 0.14, z: 0.05, rotX: 0.24, rotZ: -0.18, rotY: 0.4, scaleY: 1.02, h: 1.05 },
+      { geo: bladeMedGeo, x: -0.12, z: 0.08, rotX: 0.28, rotZ: 0.22, rotY: 1.3, scaleY: 0.98, h: 1.05 },
+      { geo: bladeMedGeo, x: -0.15, z: -0.10, rotX: -0.26, rotZ: 0.20, rotY: 2.1, scaleY: 1.05, h: 1.05 },
+      { geo: bladeMedGeo, x: 0.12, z: -0.12, rotX: -0.22, rotZ: -0.25, rotY: 3.1, scaleY: 0.95, h: 1.05 },
+      { geo: bladeMedGeo, x: 0.08, z: 0.16, rotX: 0.32, rotZ: 0.08, rotY: 4.2, scaleY: 1.00, h: 1.05 },
+      { geo: bladeShortGeo, x: 0.22, z: 0.12, rotX: 0.42, rotZ: -0.26, rotY: 0.6, scaleY: 0.90, h: 0.75 },
+      { geo: bladeShortGeo, x: -0.20, z: 0.16, rotX: 0.45, rotZ: 0.30, rotY: 1.5, scaleY: 0.88, h: 0.75 },
+      { geo: bladeShortGeo, x: -0.24, z: -0.14, rotX: -0.40, rotZ: 0.35, rotY: 2.5, scaleY: 0.92, h: 0.75 },
+      { geo: bladeShortGeo, x: 0.20, z: -0.18, rotX: -0.38, rotZ: -0.36, rotY: 3.6, scaleY: 0.85, h: 0.75 },
+      { geo: bladeShortGeo, x: 0.02, z: 0.25, rotX: 0.48, rotZ: 0.06, rotY: 4.7, scaleY: 0.93, h: 0.75 },
+      { geo: bladeTinyGeo, x: 0.30, z: 0.10, rotX: 0.55, rotZ: -0.35, rotY: 0.9, scaleY: 0.80, h: 0.50 },
+      { geo: bladeTinyGeo, x: -0.28, z: 0.18, rotX: 0.52, rotZ: 0.42, rotY: 1.8, scaleY: 0.85, h: 0.50 },
+      { geo: bladeTinyGeo, x: -0.29, z: -0.16, rotX: -0.50, rotZ: 0.45, rotY: 2.8, scaleY: 0.78, h: 0.50 },
+      { geo: bladeTinyGeo, x: 0.28, z: -0.22, rotX: -0.48, rotZ: -0.44, rotY: 3.9, scaleY: 0.82, h: 0.50 },
+      { geo: bladeTinyGeo, x: 0.05, z: 0.32, rotX: 0.58, rotZ: 0.10, rotY: 5.0, scaleY: 0.75, h: 0.50 },
+    ];
 
-    // 2. Mid Ring - Serong (Slanted at varied angles 15° - 35°)
-    { geo: bladeMedGeo, mat: matLush, x: 0.14, z: 0.05, rotX: 0.24, rotZ: -0.18, rotY: 0.4, scaleY: 1.02 },
-    { geo: bladeMedGeo, mat: matEmerald, x: -0.12, z: 0.08, rotX: 0.28, rotZ: 0.22, rotY: 1.3, scaleY: 0.98 },
-    { geo: bladeMedGeo, mat: matLime, x: -0.15, z: -0.10, rotX: -0.26, rotZ: 0.20, rotY: 2.1, scaleY: 1.05 },
-    { geo: bladeMedGeo, mat: matForest, x: 0.12, z: -0.12, rotX: -0.22, rotZ: -0.25, rotY: 3.1, scaleY: 0.95 },
-    { geo: bladeMedGeo, mat: matGolden, x: 0.08, z: 0.16, rotX: 0.32, rotZ: 0.08, rotY: 4.2, scaleY: 1.00 },
-    { geo: bladeMedGeo, mat: matSpring, x: -0.08, z: 0.15, rotX: 0.30, rotZ: -0.12, rotY: 5.2, scaleY: 0.94 },
-    { geo: bladeMedGeo, mat: matLush, x: 0.16, z: -0.04, rotX: -0.12, rotZ: -0.32, rotY: 0.8, scaleY: 1.08 },
-    { geo: bladeMedGeo, mat: matEmerald, x: -0.17, z: -0.02, rotX: 0.10, rotZ: 0.34, rotY: 2.7, scaleY: 0.97 },
+    cachedMeadowGrassBladeGeo = mergeGeometriesWithTransforms(
+      rawBlades.map((b) => ({
+        geometry: b.geo,
+        position: [b.x, (0.5 * b.scaleY * b.h) * 0.9, b.z] as [number, number, number],
+        rotation: [b.rotX, b.rotY, b.rotZ] as [number, number, number],
+        scale: [0.9, b.scaleY, 1.2] as [number, number, number],
+      }))
+    );
+  }
 
-    // 3. Wide Ring - Serong Lebih Miring (Slanted 30° - 48°)
-    { geo: bladeShortGeo, mat: matLime, x: 0.22, z: 0.12, rotX: 0.42, rotZ: -0.26, rotY: 0.6, scaleY: 0.90 },
-    { geo: bladeShortGeo, mat: matSpring, x: -0.20, z: 0.16, rotX: 0.45, rotZ: 0.30, rotY: 1.5, scaleY: 0.88 },
-    { geo: bladeShortGeo, mat: matGolden, x: -0.24, z: -0.14, rotX: -0.40, rotZ: 0.35, rotY: 2.5, scaleY: 0.92 },
-    { geo: bladeShortGeo, mat: matEmerald, x: 0.20, z: -0.18, rotX: -0.38, rotZ: -0.36, rotY: 3.6, scaleY: 0.85 },
-    { geo: bladeShortGeo, mat: matLush, x: 0.02, z: 0.25, rotX: 0.48, rotZ: 0.06, rotY: 4.7, scaleY: 0.93 },
-    { geo: bladeShortGeo, mat: matForest, x: -0.04, z: -0.24, rotX: -0.46, rotZ: -0.08, rotY: 5.8, scaleY: 0.89 },
-    { geo: bladeShortGeo, mat: matLime, x: 0.24, z: -0.02, rotX: 0.05, rotZ: -0.45, rotY: 0.1, scaleY: 0.91 },
-    { geo: bladeShortGeo, mat: matGolden, x: -0.25, z: 0.04, rotX: -0.04, rotZ: 0.48, rotY: 1.9, scaleY: 0.87 },
+  const blades = new THREE.Mesh(cachedMeadowGrassBladeGeo, matLush);
+  blades.castShadow = false;
+  blades.receiveShadow = false;
+  blades.frustumCulled = true;
+  group.add(blades);
 
-    // 4. Low Outer Fringe - Rebah Acak (Tiny shoots hugging soil)
-    { geo: bladeTinyGeo, mat: matEmerald, x: 0.30, z: 0.10, rotX: 0.55, rotZ: -0.35, rotY: 0.9, scaleY: 0.80 },
-    { geo: bladeTinyGeo, mat: matSpring, x: -0.28, z: 0.18, rotX: 0.52, rotZ: 0.42, rotY: 1.8, scaleY: 0.85 },
-    { geo: bladeTinyGeo, mat: matLush, x: -0.29, z: -0.16, rotX: -0.50, rotZ: 0.45, rotY: 2.8, scaleY: 0.78 },
-    { geo: bladeTinyGeo, mat: matLime, x: 0.28, z: -0.22, rotX: -0.48, rotZ: -0.44, rotY: 3.9, scaleY: 0.82 },
-    { geo: bladeTinyGeo, mat: matForest, x: 0.05, z: 0.32, rotX: 0.58, rotZ: 0.10, rotY: 5.0, scaleY: 0.75 },
-    { geo: bladeTinyGeo, mat: matGolden, x: -0.06, z: -0.30, rotX: -0.56, rotZ: -0.12, rotY: 6.0, scaleY: 0.80 },
-    { geo: bladeTinyGeo, mat: matEmerald, x: 0.15, z: 0.28, rotX: 0.54, rotZ: -0.20, rotY: 1.2, scaleY: 0.85 },
-    { geo: bladeTinyGeo, mat: matSpring, x: -0.18, z: -0.26, rotX: -0.52, rotZ: 0.25, rotY: 3.5, scaleY: 0.77 },
-  ];
+  if (!cachedMeadowGrassSeedGeo) {
+    const seedStalkGeo = makeFlatShadedGeo(new THREE.CylinderGeometry(0.015, 0.02, 1.45, 3));
+    const seedHeadGeo = makeFlatShadedGeo(new THREE.ConeGeometry(0.06, 0.35, 4));
+    cachedMeadowGrassSeedGeo = mergeGeometriesWithTransforms([
+      { geometry: seedStalkGeo, position: [0.08, 0.70, -0.05], rotation: [0.12, 0.5, -0.10] },
+      { geometry: seedHeadGeo, position: [0.14, 1.42, -0.09], rotation: [0.18, 0.5, -0.14] },
+      { geometry: seedStalkGeo, position: [-0.06, 0.65, 0.06], rotation: [-0.10, 2.2, 0.14] },
+      { geometry: seedHeadGeo, position: [-0.11, 1.35, 0.11], rotation: [-0.14, 2.2, 0.18] },
+    ]);
+  }
 
-  bladeList.forEach((b) => {
-    const mesh = new THREE.Mesh(b.geo, b.mat);
-    mesh.position.set(b.x, (0.5 * b.scaleY * (b.geo === bladeTallGeo ? 1.35 : b.geo === bladeMedGeo ? 1.05 : 0.75)) * 0.9, b.z);
-    mesh.rotation.set(b.rotX, b.rotY, b.rotZ);
-    mesh.scale.set(0.9, b.scaleY, 1.2);
-    mesh.castShadow = false;
-    mesh.receiveShadow = false;
-    mesh.frustumCulled = true;
-    group.add(mesh);
-  });
-
-  // Tall Meadow Seedhead Stalks (Bulir Rumput Padang)
-  const seedStalkGeo = makeFlatShadedGeo(new THREE.CylinderGeometry(0.015, 0.02, 1.45, 3));
-  const stalk1 = new THREE.Mesh(seedStalkGeo, matForest);
-  stalk1.position.set(0.08, 0.70, -0.05);
-  stalk1.rotation.set(0.12, 0.5, -0.10);
-  stalk1.castShadow = false;
-  stalk1.receiveShadow = false;
-  stalk1.frustumCulled = true;
-  group.add(stalk1);
-
-  const head1 = new THREE.Mesh(seedHeadGeo, matSeed);
-  head1.position.set(0.14, 1.42, -0.09);
-  head1.rotation.set(0.18, 0.5, -0.14);
-  head1.castShadow = false;
-  head1.receiveShadow = false;
-  head1.frustumCulled = true;
-  group.add(head1);
-
-  const stalk2 = new THREE.Mesh(seedStalkGeo, matLush);
-  stalk2.position.set(-0.06, 0.65, 0.06);
-  stalk2.rotation.set(-0.10, 2.2, 0.14);
-  stalk2.castShadow = false;
-  stalk2.receiveShadow = false;
-  stalk2.frustumCulled = true;
-  group.add(stalk2);
-
-  const head2 = new THREE.Mesh(seedHeadGeo, matSeed);
-  head2.position.set(-0.11, 1.35, 0.11);
-  head2.rotation.set(-0.14, 2.2, 0.18);
-  head2.castShadow = false;
-  head2.receiveShadow = false;
-  head2.frustumCulled = true;
-  group.add(head2);
+  const seeds = new THREE.Mesh(cachedMeadowGrassSeedGeo, matSeed);
+  seeds.castShadow = false;
+  seeds.receiveShadow = false;
+  seeds.frustumCulled = true;
+  group.add(seeds);
 
   return group;
 }
 
+let cachedFlowerPatchGrassGeo: THREE.BufferGeometry | null = null;
+let cachedFlowerPatchStemGeo: THREE.BufferGeometry | null = null;
+let cachedFlowerPatchBlossomGeo: THREE.BufferGeometry | null = null;
+
 /**
- * 4c. Stylized Wildflower Patch with Intertwined Meadow Grass (Bunga Padang & Rumput Liar)
- * Organically blends colourful wildflowers rising directly between and overlapping with
- * random meadow grass blades (tumpang tindih dengan rumput acak).
+ * 4c. Stylized Wildflower Patch with Intertwined Meadow Grass (Merged High Performance)
+ * Consolidates ~50 individual meshes into 3 clean merged draw calls.
  */
 export function createFlowerPatch(): THREE.Group {
   const group = new THREE.Group();
   group.name = 'flower_patch';
   group.userData = { isWindFoliage: true };
 
-  // 1. Botanical materials for base grass blades
-  const matGrassDark = createMobileMat({ color: 0x15803d, roughness: 0.65 });
-  const matGrassMid = createMobileMat({ color: 0x16a34a, roughness: 0.60 });
-  const matGrassBright = createMobileMat({ color: 0x22c55e, roughness: 0.60 });
-  const matGrassLime = createMobileMat({ color: 0x84cc16, roughness: 0.55 });
-  const matStem = createMobileMat({ color: 0x22c55e, roughness: 0.60 });
+  const matGrass = createMobileMat({ color: 0x16a34a, roughness: 0.60 });
+  const matStem = createMobileMat({ color: 0x15803d, roughness: 0.70 });
+  const matBlossom = createMobileMat({ color: 0xfef08a, roughness: 0.40 });
 
-  // Blade geometries for intermixed grass
-  const grassTallGeo = makeFlatShadedGeo(new THREE.ConeGeometry(0.040, 1.25, 3));
-  const grassMedGeo = makeFlatShadedGeo(new THREE.ConeGeometry(0.035, 0.95, 3));
-  const grassShortGeo = makeFlatShadedGeo(new THREE.ConeGeometry(0.030, 0.65, 3));
+  // 1. Intertwining Grass Blades (Merged into 1 geometry)
+  if (!cachedFlowerPatchGrassGeo) {
+    const grassTallGeo = makeFlatShadedGeo(new THREE.ConeGeometry(0.040, 1.25, 3));
+    const grassMedGeo = makeFlatShadedGeo(new THREE.ConeGeometry(0.035, 0.95, 3));
+    const grassShortGeo = makeFlatShadedGeo(new THREE.ConeGeometry(0.030, 0.65, 3));
 
-  // Dense randomized grass blades intertwining throughout the flower patch
-  const grassConfigs = [
-    // Center & mid grass blades surrounding flower stems
-    { geo: grassTallGeo, mat: matGrassDark, x: 0.02, z: 0.01, rotX: 0.05, rotZ: 0.04, rotY: 0.3, scaleY: 1.1 },
-    { geo: grassTallGeo, mat: matGrassMid, x: -0.06, z: 0.08, rotX: 0.12, rotZ: -0.15, rotY: 1.2, scaleY: 1.15 },
-    { geo: grassTallGeo, mat: matGrassBright, x: 0.09, z: -0.07, rotX: -0.14, rotZ: 0.12, rotY: 2.1, scaleY: 1.05 },
-    { geo: grassMedGeo, mat: matGrassLime, x: -0.12, z: -0.08, rotX: -0.22, rotZ: -0.18, rotY: 3.0, scaleY: 1.0 },
-    { geo: grassMedGeo, mat: matGrassMid, x: 0.15, z: 0.12, rotX: 0.25, rotZ: 0.16, rotY: 3.9, scaleY: 0.95 },
-    { geo: grassMedGeo, mat: matGrassBright, x: -0.18, z: 0.14, rotX: 0.28, rotZ: -0.22, rotY: 4.8, scaleY: 1.05 },
-    { geo: grassMedGeo, mat: matGrassDark, x: 0.18, z: -0.14, rotX: -0.24, rotZ: 0.26, rotY: 5.7, scaleY: 0.92 },
-    { geo: grassMedGeo, mat: matGrassLime, x: 0.04, z: 0.22, rotX: 0.34, rotZ: 0.05, rotY: 0.7, scaleY: 0.98 },
-    { geo: grassMedGeo, mat: matGrassMid, x: -0.05, z: -0.22, rotX: -0.32, rotZ: -0.07, rotY: 1.9, scaleY: 1.02 },
-    // Outer angled grass blades leaning outward
-    { geo: grassShortGeo, mat: matGrassBright, x: 0.25, z: 0.05, rotX: 0.38, rotZ: 0.32, rotY: 0.4, scaleY: 0.9 },
-    { geo: grassShortGeo, mat: matGrassLime, x: -0.24, z: -0.06, rotX: -0.35, rotZ: -0.36, rotY: 1.6, scaleY: 0.88 },
-    { geo: grassShortGeo, mat: matGrassDark, x: 0.22, z: 0.22, rotX: 0.42, rotZ: -0.25, rotY: 2.7, scaleY: 0.85 },
-    { geo: grassShortGeo, mat: matGrassMid, x: -0.20, z: 0.24, rotX: 0.44, rotZ: 0.28, rotY: 3.8, scaleY: 0.92 },
-    { geo: grassShortGeo, mat: matGrassBright, x: -0.22, z: -0.20, rotX: -0.40, rotZ: 0.32, rotY: 4.9, scaleY: 0.87 },
-    { geo: grassShortGeo, mat: matGrassLime, x: 0.20, z: -0.24, rotX: -0.38, rotZ: -0.30, rotY: 5.9, scaleY: 0.85 },
-    { geo: grassShortGeo, mat: matGrassMid, x: 0.00, z: 0.32, rotX: 0.50, rotZ: 0.04, rotY: 0.1, scaleY: 0.82 },
-    { geo: grassShortGeo, mat: matGrassDark, x: 0.02, z: -0.30, rotX: -0.48, rotZ: -0.06, rotY: 2.4, scaleY: 0.80 },
-    { geo: grassShortGeo, mat: matGrassBright, x: 0.32, z: -0.08, rotX: -0.15, rotZ: 0.52, rotY: 3.3, scaleY: 0.78 },
-    { geo: grassShortGeo, mat: matGrassLime, x: -0.30, z: 0.08, rotX: 0.18, rotZ: -0.50, rotY: 4.5, scaleY: 0.80 },
-  ];
+    const grassConfigs = [
+      { geo: grassTallGeo, x: 0.02, z: 0.01, rotX: 0.05, rotZ: 0.04, rotY: 0.3, scaleY: 1.1, h: 1.25 },
+      { geo: grassTallGeo, x: -0.06, z: 0.08, rotX: 0.12, rotZ: -0.15, rotY: 1.2, scaleY: 1.15, h: 1.25 },
+      { geo: grassTallGeo, x: 0.09, z: -0.07, rotX: -0.14, rotZ: 0.12, rotY: 2.1, scaleY: 1.05, h: 1.25 },
+      { geo: grassMedGeo, x: -0.12, z: -0.08, rotX: -0.22, rotZ: -0.18, rotY: 3.0, scaleY: 1.0, h: 0.95 },
+      { geo: grassMedGeo, x: 0.15, z: 0.12, rotX: 0.25, rotZ: 0.16, rotY: 3.9, scaleY: 0.95, h: 0.95 },
+      { geo: grassMedGeo, x: -0.18, z: 0.14, rotX: 0.28, rotZ: -0.22, rotY: 4.8, scaleY: 1.05, h: 0.95 },
+      { geo: grassMedGeo, x: 0.18, z: -0.14, rotX: -0.24, rotZ: 0.26, rotY: 5.7, scaleY: 0.92, h: 0.95 },
+      { geo: grassMedGeo, x: 0.04, z: 0.22, rotX: 0.34, rotZ: 0.05, rotY: 0.7, scaleY: 0.98, h: 0.95 },
+      { geo: grassShortGeo, x: 0.25, z: 0.05, rotX: 0.38, rotZ: 0.32, rotY: 0.4, scaleY: 0.9, h: 0.65 },
+      { geo: grassShortGeo, x: -0.24, z: -0.06, rotX: -0.35, rotZ: -0.36, rotY: 1.6, scaleY: 0.88, h: 0.65 },
+      { geo: grassShortGeo, x: 0.22, z: 0.22, rotX: 0.42, rotZ: -0.25, rotY: 2.7, scaleY: 0.85, h: 0.65 },
+      { geo: grassShortGeo, x: -0.20, z: 0.24, rotX: 0.44, rotZ: 0.28, rotY: 3.8, scaleY: 0.92, h: 0.65 },
+      { geo: grassShortGeo, x: 0.00, z: 0.32, rotX: 0.50, rotZ: 0.04, rotY: 0.1, scaleY: 0.82, h: 0.65 },
+      { geo: grassShortGeo, x: 0.02, z: -0.30, rotX: -0.48, rotZ: -0.06, rotY: 2.4, scaleY: 0.80, h: 0.65 },
+    ];
 
-  grassConfigs.forEach((g) => {
-    const blade = new THREE.Mesh(g.geo, g.mat);
-    blade.position.set(g.x, (0.5 * g.scaleY * (g.geo === grassTallGeo ? 1.25 : g.geo === grassMedGeo ? 0.95 : 0.65)) * 0.9, g.z);
-    blade.rotation.set(g.rotX, g.rotY, g.rotZ);
-    blade.scale.set(0.85, g.scaleY, 1.15);
-    blade.castShadow = false;
-    blade.receiveShadow = false;
-    blade.frustumCulled = true;
-    group.add(blade);
-  });
+    cachedFlowerPatchGrassGeo = mergeGeometriesWithTransforms(
+      grassConfigs.map((g) => ({
+        geometry: g.geo,
+        position: [g.x, (0.5 * g.scaleY * g.h) * 0.9, g.z] as [number, number, number],
+        rotation: [g.rotX, g.rotY, g.rotZ] as [number, number, number],
+        scale: [0.85, g.scaleY, 1.15] as [number, number, number],
+      }))
+    );
+  }
 
-  // 2. Wildflower Color Materials (Natural meadow blossoms)
-  const flowerMatWhite = createMobileMat({ color: 0xffffff, roughness: 0.35, metalness: 0.02 });
-  const flowerMatYellow = createMobileMat({ color: 0xfacc15, roughness: 0.30, metalness: 0.05 });
-  const flowerMatOrange = createMobileMat({ color: 0xf97316, roughness: 0.35, metalness: 0.05 });
-  const flowerMatRose = createMobileMat({ color: 0xf43f5e, roughness: 0.35, metalness: 0.03 });
-  const flowerMatPurple = createMobileMat({ color: 0xa855f7, roughness: 0.35, metalness: 0.04 });
-  const flowerMatBlue = createMobileMat({ color: 0x38bdf8, roughness: 0.35, metalness: 0.03 });
-  const flowerMatLavender = createMobileMat({ color: 0xc084fc, roughness: 0.35, metalness: 0.03 });
-  const centerMatGold = createMobileMat({ color: 0xeab308, roughness: 0.40 });
-  const centerMatAmber = createMobileMat({ color: 0xb45309, roughness: 0.40 });
-  const leafMat = createMobileMat({ color: 0x16a34a, roughness: 0.60 });
+  const grass = new THREE.Mesh(cachedFlowerPatchGrassGeo, matGrass);
+  grass.castShadow = false;
+  grass.receiveShadow = false;
+  grass.frustumCulled = true;
+  group.add(grass);
 
-  // Reusable flower geometries
-  const stemGeo = makeFlatShadedGeo(new THREE.CylinderGeometry(0.022, 0.028, 0.85, 4));
-  const shortStemGeo = makeFlatShadedGeo(new THREE.CylinderGeometry(0.020, 0.025, 0.55, 4));
-  const petalDiscGeo = makeFlatShadedGeo(new THREE.CylinderGeometry(0.14, 0.14, 0.04, 6));
-  const blossomDomeGeo = makeFlatShadedGeo(new THREE.DodecahedronGeometry(0.13, 0));
-  const centerPollenGeo = makeFlatShadedGeo(new THREE.DodecahedronGeometry(0.065, 0));
-  const stemLeafGeo = makeFlatShadedGeo(new THREE.ConeGeometry(0.03, 0.16, 3));
+  // 2. Wildflower Stems (Merged into 1 geometry)
+  if (!cachedFlowerPatchStemGeo) {
+    const stemGeo = makeFlatShadedGeo(new THREE.CylinderGeometry(0.020, 0.025, 0.75, 4));
+    const stemTransforms = [
+      { geometry: stemGeo, position: [0.08, 0.38, 0.05] as [number, number, number], rotation: [0.12, 0.4, -0.15] as [number, number, number] },
+      { geometry: stemGeo, position: [-0.10, 0.35, 0.12] as [number, number, number], rotation: [0.18, 1.2, 0.20] as [number, number, number] },
+      { geometry: stemGeo, position: [0.16, 0.32, -0.08] as [number, number, number], rotation: [-0.20, 2.3, -0.18] as [number, number, number] },
+      { geometry: stemGeo, position: [-0.14, 0.36, -0.12] as [number, number, number], rotation: [-0.15, 3.1, 0.18] as [number, number, number] },
+      { geometry: stemGeo, position: [0.02, 0.39, 0.18] as [number, number, number], rotation: [0.22, 4.0, 0.05] as [number, number, number] },
+      { geometry: stemGeo, position: [-0.04, 0.28, -0.16] as [number, number, number], rotation: [-0.25, 4.9, -0.10] as [number, number, number] },
+    ];
+    cachedFlowerPatchStemGeo = mergeGeometriesWithTransforms(stemTransforms);
+  }
 
-  // Helper to add a realistic wildflower nestled among grass
-  const addWildflower = (
-    stemX: number,
-    stemZ: number,
-    height: number,
-    tiltX: number,
-    tiltZ: number,
-    petalMat: THREE.Material,
-    centerMat: THREE.Material,
-    isDaisy = true
-  ) => {
-    // 1. Curved/angled stem
-    const currentStemGeo = height > 0.7 ? stemGeo : shortStemGeo;
-    const stem = new THREE.Mesh(currentStemGeo, matStem);
-    stem.position.set(stemX, height * 0.48, stemZ);
-    stem.rotation.set(tiltX, Math.random() * Math.PI, tiltZ);
-    stem.scale.set(1.0, height / 0.85, 1.0);
-    stem.castShadow = false;
-    stem.receiveShadow = false;
-    stem.frustumCulled = true;
-    group.add(stem);
+  const stems = new THREE.Mesh(cachedFlowerPatchStemGeo, matStem);
+  stems.castShadow = false;
+  stems.receiveShadow = false;
+  stems.frustumCulled = true;
+  group.add(stems);
 
-    // Stem leaf node nestled in grass
-    const leaf = new THREE.Mesh(stemLeafGeo, leafMat);
-    leaf.position.set(stemX + tiltX * 0.2, height * 0.35, stemZ + tiltZ * 0.2);
-    leaf.rotation.set(tiltX + 0.6, Math.random() * Math.PI, tiltZ);
-    leaf.frustumCulled = true;
-    group.add(leaf);
+  // 3. Cheerful Wildflower Blossoms (Merged into 1 geometry)
+  if (!cachedFlowerPatchBlossomGeo) {
+    const blossomGeo = makeFlatShadedGeo(new THREE.DodecahedronGeometry(0.12, 0));
+    const blossomTransforms = [
+      { geometry: blossomGeo, position: [0.08, 0.78, 0.05] as [number, number, number] },
+      { geometry: blossomGeo, position: [-0.10, 0.72, 0.12] as [number, number, number] },
+      { geometry: blossomGeo, position: [0.16, 0.65, -0.08] as [number, number, number] },
+      { geometry: blossomGeo, position: [-0.14, 0.74, -0.12] as [number, number, number] },
+      { geometry: blossomGeo, position: [0.02, 0.80, 0.18] as [number, number, number] },
+      { geometry: blossomGeo, position: [-0.04, 0.58, -0.16] as [number, number, number] },
+    ];
+    cachedFlowerPatchBlossomGeo = mergeGeometriesWithTransforms(blossomTransforms);
+  }
 
-    // Blossom position at the stem tip
-    const blossomY = height * 0.94;
-    const blossomX = stemX + tiltZ * (height * 0.35);
-    const blossomZ = stemZ - tiltX * (height * 0.35);
-
-    if (isDaisy) {
-      // Petal wheel (daisy / chamomile / buttercup)
-      const petals = new THREE.Mesh(petalDiscGeo, petalMat);
-      petals.position.set(blossomX, blossomY, blossomZ);
-      petals.rotation.set(tiltX * 0.8 + 0.1, Math.random() * Math.PI, tiltZ * 0.8);
-      petals.castShadow = false;
-      petals.receiveShadow = false;
-      petals.frustumCulled = true;
-      group.add(petals);
-
-      // Golden center pollen dome
-      const pollen = new THREE.Mesh(centerPollenGeo, centerMat);
-      pollen.position.set(blossomX, blossomY + 0.03, blossomZ);
-      pollen.castShadow = false;
-      pollen.receiveShadow = false;
-      pollen.frustumCulled = true;
-      group.add(pollen);
-    } else {
-      // Rounded multi-faceted blossom (poppy / rose / cornflower)
-      const flowerDome = new THREE.Mesh(blossomDomeGeo, petalMat);
-      flowerDome.position.set(blossomX, blossomY, blossomZ);
-      flowerDome.rotation.set(tiltX * 0.6, Math.random() * Math.PI, tiltZ * 0.6);
-      flowerDome.scale.set(1.15, 0.95, 1.15);
-      flowerDome.castShadow = false;
-      flowerDome.receiveShadow = false;
-      flowerDome.frustumCulled = true;
-      group.add(flowerDome);
-
-      const pollen = new THREE.Mesh(centerPollenGeo, centerMat);
-      pollen.position.set(blossomX, blossomY + 0.05, blossomZ);
-      pollen.castShadow = false;
-      pollen.receiveShadow = false;
-      pollen.frustumCulled = true;
-      group.add(pollen);
-    }
-  };
-
-  // 8 distinct wildflowers placed across the clump at varied heights, nested within the grass blades:
-  // 1. Tall White Chamomile Daisy (rising slightly above center grass)
-  addWildflower(0.08, 0.05, 0.92, 0.12, -0.15, flowerMatWhite, centerMatGold, true);
-
-  // 2. Bright Golden Buttercup (mid height, framed by blades)
-  addWildflower(-0.10, 0.12, 0.82, 0.18, 0.20, flowerMatYellow, centerMatAmber, true);
-
-  // 3. Scarlet Wild Poppy (vivid blossom peeking through side grass)
-  addWildflower(0.16, -0.08, 0.76, -0.20, -0.18, flowerMatRose, centerMatAmber, false);
-
-  // 4. Sky Blue Alpine Blossom (delicate pastel petals)
-  addWildflower(-0.14, -0.12, 0.88, -0.15, 0.18, flowerMatBlue, centerMatGold, true);
-
-  // 5. Lavender Wildflower (tall elegant floret)
-  addWildflower(0.02, 0.18, 0.96, 0.22, 0.05, flowerMatLavender, centerMatGold, false);
-
-  // 6. Warm Orange Meadow Bloom (low nestled in grass blades)
-  addWildflower(-0.04, -0.16, 0.62, -0.25, -0.10, flowerMatOrange, centerMatAmber, true);
-
-  // 7. Small White Daisy (tucked in front fringe)
-  addWildflower(0.20, 0.10, 0.68, 0.26, -0.22, flowerMatWhite, centerMatGold, true);
-
-  // 8. Soft Purple Cornflower (side leaning blossom)
-  addWildflower(-0.18, 0.02, 0.72, 0.05, 0.28, flowerMatPurple, centerMatGold, false);
+  const blossoms = new THREE.Mesh(cachedFlowerPatchBlossomGeo, matBlossom);
+  blossoms.castShadow = false;
+  blossoms.receiveShadow = false;
+  blossoms.frustumCulled = true;
+  group.add(blossoms);
 
   return group;
 }
@@ -1795,132 +1715,99 @@ export function createWoodenBridge(): THREE.Group {
   return group;
 }
 
+let cachedPathCurbStonesGeo: THREE.BufferGeometry | null = null;
+let cachedPathCurbFoliageStoneGeo: THREE.BufferGeometry | null = null;
+let cachedPathCurbFoliageGrassGeo: THREE.BufferGeometry | null = null;
+let cachedPathCurbFoliageFlowerGeo: THREE.BufferGeometry | null = null;
+
 /**
- * 19. Batu Pembatas Paving (Path Curb Stones - 8 composite parts)
- * Modular solid curb stone blocks with beveled edges and dark mortar joints.
+ * 19. Batu Pembatas Paving (Path Curb Stones - Single Merged Draw Call)
+ * Modular solid curb stone blocks with beveled edges and natural river stone finish.
  */
 export function createPathCurbStones(): THREE.Group {
   const group = new THREE.Group();
   group.name = 'path_curb_stones';
 
-  const stoneMatA = createMobileMat({ color: 0x526075, roughness: 0.85, metalness: 0.08 });
-  const stoneMatB = createMobileMat({ color: 0x475569, roughness: 0.88, metalness: 0.06 });
-  const skirtMat = createMobileMat({ color: 0x334155, roughness: 0.95 });
+  if (!cachedPathCurbStonesGeo) {
+    const blockGeo = makeFlatShadedGeo(new THREE.BoxGeometry(0.24, 0.14, 0.44));
+    cachedPathCurbStonesGeo = mergeGeometriesWithTransforms([
+      { geometry: blockGeo, position: [0, 0.07, -0.23] },
+      { geometry: blockGeo, position: [0, 0.07, 0.23] },
+    ]);
+  }
 
-  // Subterranean foundation skirt (anchors deep into slope so underside never floats in air)
-  const skirtGeo = new THREE.BoxGeometry(0.28, 0.28, 0.92);
-  const skirt = new THREE.Mesh(skirtGeo, skirtMat);
-  skirt.position.set(0, -0.06, 0);
-  skirt.receiveShadow = true;
-  group.add(skirt);
-
-  // 2 compact beveled curb blocks (0.42m each = 0.88m total length)
-  const blockGeo = makeFlatShadedGeo(new THREE.BoxGeometry(0.24, 0.16, 0.42));
-  const zPositions = [-0.22, 0.22];
-
-  zPositions.forEach((zp, idx) => {
-    const block = new THREE.Mesh(blockGeo, idx % 2 === 0 ? stoneMatA : stoneMatB);
-    block.position.set(0, 0.08, zp);
-    block.castShadow = true;
-    block.receiveShadow = true;
-    group.add(block);
-  });
+  const stoneMat = createMobileMat({ color: 0xdcd8d0, roughness: 0.70 });
+  const block = new THREE.Mesh(cachedPathCurbStonesGeo, stoneMat);
+  block.castShadow = false;
+  block.receiveShadow = false;
+  group.add(block);
 
   return group;
 }
 
 /**
  * 20. Batu Pembatas Paving & Rumput Bunga Alami (Path Curb with Natural Foliage)
- * Combines granite curb stones with lush wildflower clusters firmly grounded.
+ * Highly optimized composite with merged geometries and zero contact shadow discs.
+ * Completely eliminates the black rectangular quad artifact on mobile terrain slopes.
  */
 export function createPathCurbWithFoliage(): THREE.Group {
   const group = new THREE.Group();
   group.name = 'path_curb_with_foliage';
 
-  const stoneMatA = createMobileMat({ color: 0x526075, roughness: 0.85 });
-  const stoneMatB = createMobileMat({ color: 0x475569, roughness: 0.88 });
-  const skirtMat = createMobileMat({ color: 0x334155, roughness: 0.95 });
+  // 1. Curb Stones (Merged into 1 geometry)
+  if (!cachedPathCurbFoliageStoneGeo) {
+    const blockGeo = makeFlatShadedGeo(new THREE.BoxGeometry(0.22, 0.14, 0.44));
+    cachedPathCurbFoliageStoneGeo = mergeGeometriesWithTransforms([
+      { geometry: blockGeo, position: [-0.06, 0.07, -0.23] },
+      { geometry: blockGeo, position: [-0.06, 0.07, 0.23] },
+    ]);
+  }
+  const stoneMat = createMobileMat({ color: 0xdcd8d0, roughness: 0.70 });
+  const stones = new THREE.Mesh(cachedPathCurbFoliageStoneGeo, stoneMat);
+  stones.castShadow = false;
+  stones.receiveShadow = false;
+  group.add(stones);
 
-  // Subterranean anchor skirt
-  const skirtGeo = new THREE.BoxGeometry(0.32, 0.28, 0.92);
-  const skirt = new THREE.Mesh(skirtGeo, skirtMat);
-  skirt.position.set(-0.02, -0.06, 0);
-  skirt.receiveShadow = true;
-  group.add(skirt);
+  // 2. Natural Meadow Grass tufts along shoulder (Merged into 1 geometry)
+  if (!cachedPathCurbFoliageGrassGeo) {
+    const bladeGeo = makeFlatShadedGeo(new THREE.ConeGeometry(0.04, 0.65, 3));
+    const grassTransforms = [
+      { geometry: bladeGeo, position: [0.15, 0.28, -0.85] as [number, number, number], rotation: [0.2, 0.4, 0.3] as [number, number, number] },
+      { geometry: bladeGeo, position: [0.18, 0.28, -0.50] as [number, number, number], rotation: [-0.2, 1.2, 0.4] as [number, number, number] },
+      { geometry: bladeGeo, position: [0.14, 0.28, -0.15] as [number, number, number], rotation: [0.3, 2.0, 0.25] as [number, number, number] },
+      { geometry: bladeGeo, position: [0.20, 0.28, 0.20] as [number, number, number], rotation: [-0.25, 2.8, 0.35] as [number, number, number] },
+      { geometry: bladeGeo, position: [0.16, 0.28, 0.55] as [number, number, number], rotation: [0.15, 3.6, 0.4] as [number, number, number] },
+      { geometry: bladeGeo, position: [0.19, 0.28, 0.90] as [number, number, number], rotation: [-0.3, 4.4, 0.3] as [number, number, number] },
+    ];
+    cachedPathCurbFoliageGrassGeo = mergeGeometriesWithTransforms(grassTransforms);
+  }
+  const grassMat = createMobileMat({ color: 0x22c55e, roughness: 0.60 });
+  const grass = new THREE.Mesh(cachedPathCurbFoliageGrassGeo, grassMat);
+  grass.castShadow = false;
+  grass.receiveShadow = false;
+  group.add(grass);
 
-  // 2 curb stone blocks
-  const blockGeo = makeFlatShadedGeo(new THREE.BoxGeometry(0.22, 0.16, 0.42));
-  const zPositions = [-0.22, 0.22];
+  // 3. Cheerful Wild Flowers nestled beside curb (Merged into 1 blossom mesh)
+  if (!cachedPathCurbFoliageFlowerGeo) {
+    const stemGeo = makeFlatShadedGeo(new THREE.CylinderGeometry(0.015, 0.02, 0.35, 4));
+    const flowerDomeGeo = makeFlatShadedGeo(new THREE.DodecahedronGeometry(0.09, 0));
+    const flowerTransforms = [
+      { geometry: stemGeo, position: [0.18, 0.15, -0.65] as [number, number, number] },
+      { geometry: flowerDomeGeo, position: [0.18, 0.32, -0.65] as [number, number, number] },
+      { geometry: stemGeo, position: [0.22, 0.18, 0.05] as [number, number, number] },
+      { geometry: flowerDomeGeo, position: [0.22, 0.36, 0.05] as [number, number, number] },
+      { geometry: stemGeo, position: [0.17, 0.16, 0.72] as [number, number, number] },
+      { geometry: flowerDomeGeo, position: [0.17, 0.34, 0.72] as [number, number, number] },
+    ];
+    cachedPathCurbFoliageFlowerGeo = mergeGeometriesWithTransforms(flowerTransforms);
+  }
+  const flowerMat = createMobileMat({ color: 0xfef08a, roughness: 0.45 });
+  const flowers = new THREE.Mesh(cachedPathCurbFoliageFlowerGeo, flowerMat);
+  flowers.castShadow = false;
+  flowers.receiveShadow = false;
+  group.add(flowers);
 
-  zPositions.forEach((zp, idx) => {
-    const block = new THREE.Mesh(blockGeo, idx % 2 === 0 ? stoneMatA : stoneMatB);
-    block.position.set(-0.06, 0.08, zp);
-    block.castShadow = true;
-    block.receiveShadow = true;
-    group.add(block);
-  });
-
-  // 2. Natural Meadow Grass tufts along the outer shoulder (X = +0.16)
-  const grassMatLush = createMobileMat({ color: 0x16a34a, roughness: 0.65 });
-  const grassMatLime = createMobileMat({ color: 0x84cc16, roughness: 0.60 });
-  const grassMatSpring = createMobileMat({ color: 0x4ade80, roughness: 0.58 });
-  const bladeGeo = makeFlatShadedGeo(new THREE.ConeGeometry(0.04, 0.65, 3));
-
-  const grassOffsets = [
-    { x: 0.15, z: -0.85, rotX: 0.2, rotZ: 0.3, mat: grassMatLush },
-    { x: 0.18, z: -0.50, rotX: -0.2, rotZ: 0.4, mat: grassMatLime },
-    { x: 0.14, z: -0.15, rotX: 0.3, rotZ: 0.25, mat: grassMatSpring },
-    { x: 0.20, z: 0.20, rotX: -0.25, rotZ: 0.35, mat: grassMatLush },
-    { x: 0.16, z: 0.55, rotX: 0.15, rotZ: 0.4, mat: grassMatLime },
-    { x: 0.19, z: 0.90, rotX: -0.3, rotZ: 0.3, mat: grassMatSpring },
-  ];
-
-  grassOffsets.forEach((g) => {
-    const blade = new THREE.Mesh(bladeGeo, g.mat);
-    blade.position.set(g.x, 0.28, g.z);
-    blade.rotation.set(g.rotX, Math.random() * Math.PI, g.rotZ);
-    blade.castShadow = false;
-    group.add(blade);
-  });
-
-  // 3. Cheerful Wild Flowers nestled beside the curb stones
-  const flowerStemMat = createMobileMat({ color: 0x15803d, roughness: 0.8 });
-  const flowerCenterMat = createMobileMat({ color: 0xfbbf24, roughness: 0.4 });
-  const flowerPinkMat = createMobileMat({ color: 0xf472b6, roughness: 0.5 });
-  const flowerWhiteMat = createMobileMat({ color: 0xf8fafc, roughness: 0.5 });
-  const flowerYellowMat = createMobileMat({ color: 0xfacc15, roughness: 0.4 });
-
-  const petalGeo = makeFlatShadedGeo(new THREE.SphereGeometry(0.075, 5, 4));
-  const centerGeo = makeFlatShadedGeo(new THREE.SphereGeometry(0.06, 5, 4));
-  const stemGeo = makeFlatShadedGeo(new THREE.CylinderGeometry(0.015, 0.02, 0.35, 4));
-
-  const flowerPositions = [
-    { x: 0.18, z: -0.65, y: 0.30, petalMat: flowerPinkMat },
-    { x: 0.22, z: 0.05, y: 0.34, petalMat: flowerYellowMat },
-    { x: 0.17, z: 0.72, y: 0.32, petalMat: flowerWhiteMat },
-  ];
-
-  flowerPositions.forEach((fl) => {
-    // Stem
-    const stem = new THREE.Mesh(stemGeo, flowerStemMat);
-    stem.position.set(fl.x, fl.y - 0.15, fl.z);
-    group.add(stem);
-
-    // Yellow Core
-    const center = new THREE.Mesh(centerGeo, flowerCenterMat);
-    center.position.set(fl.x, fl.y, fl.z);
-    group.add(center);
-
-    // Petals around center
-    for (let p = 0; p < 4; p++) {
-      const angle = (p / 4) * Math.PI * 2;
-      const petal = new THREE.Mesh(petalGeo, fl.petalMat);
-      petal.position.set(fl.x + Math.cos(angle) * 0.09, fl.y, fl.z + Math.sin(angle) * 0.09);
-      group.add(petal);
-    }
-  });
-
-  group.add(createContactShadowDisc(1.8));
+  // Note: createContactShadowDisc is deliberately omitted to prevent black shadow quads on slopes
   return group;
 }
 

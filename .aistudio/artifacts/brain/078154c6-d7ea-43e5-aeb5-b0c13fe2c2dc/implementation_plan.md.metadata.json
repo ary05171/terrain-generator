@@ -1,0 +1,6 @@
+{
+  "summary":  "Rencana optimasi performa 3D mobile: batas resolusi adaptif DPR (1.0-1.25x) untuk kelancaran kamera, instancing terpadu & penggabungan geometri vegetasi/batu pembatas (mengeliminasi artefak kotak hitam), resolusi bayangan ringan adaptif (512px), dan eliminasi alokasi GC di loop render 60fps.",
+  "updatedAt":  "2026-10-20T23:44:17.529050554Z",
+  "requestFeedback":  true,
+  "userFacing":  true
+}

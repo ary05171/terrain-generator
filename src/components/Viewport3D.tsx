@@ -16,6 +16,9 @@ import {
   EyeOff,
   ChevronDown,
   ChevronUp,
+  Eraser,
+  Upload,
+  Image as ImageIcon,
 } from 'lucide-react';
 import {
   BiomeType,
@@ -48,6 +51,8 @@ import {
 import {
   createCobblestoneRoadMaterial,
   getClassicCobblestoneTexture,
+  ROAD_TEXTURE_PRESETS,
+  RoadTexturePreset,
 } from '../core/roadTextures';
 
 /**
@@ -141,15 +146,25 @@ export function createPinMarkerMesh(type: 'A' | 'B' | 'C'): THREE.Group {
 }
 
 /**
- * Creates 3D Route Ribbon mesh linking Pin A to Pin B with 2D Classic Cobblestone Texture
+ * Creates 3D Route Ribbon mesh linking Pin A to Pin B with selected 2D Road Texture
  */
-export function createRouteRibbonMesh(): THREE.Mesh {
+export function createRouteRibbonMesh(options?: { textureId?: string; customUrl?: string }): THREE.Mesh {
   const geom = new THREE.BufferGeometry();
-  const mat = createCobblestoneRoadMaterial({ opacity: 0.98, transparent: true });
+  const mat = createCobblestoneRoadMaterial({
+    opacity: 0.98,
+    transparent: true,
+    textureId: options?.textureId,
+    customUrl: options?.customUrl,
+  });
   const mesh = new THREE.Mesh(geom, mat);
-  mesh.name = 'NavigationRouteRibbon';
+  mesh.name = `PermanentRoadRibbon_${Date.now()}`;
   mesh.renderOrder = 997;
   mesh.receiveShadow = true;
+  mesh.userData = {
+    isRoadMesh: true,
+    textureId: options?.textureId || 'classic_cobblestone',
+    customUrl: options?.customUrl,
+  };
   return mesh;
 }
 
@@ -764,6 +779,8 @@ interface Viewport3DProps {
   onToast?: (msg: string) => void;
   isRoadBuilderActive?: boolean;
   onToggleRoadBuilder?: () => void;
+  cameraTouchMode?: 'rotate' | 'pan' | 'zoom';
+  onCameraTouchModeChange?: (mode: 'rotate' | 'pan' | 'zoom') => void;
 }
 
 // Module-level pre-allocated scratch objects to prevent GC in animation loop
@@ -865,6 +882,31 @@ function buildTerrainBufferGeometry(
   return geo;
 }
 
+/**
+ * Detects mobile phones and touch-first devices to apply adaptive performance boundaries.
+ */
+export const isMobileDevice = () => {
+  if (typeof window === 'undefined') return false;
+  return (
+    window.innerWidth <= 768 ||
+    'ontouchstart' in window ||
+    navigator.maxTouchPoints > 0 ||
+    /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+  );
+};
+
+/**
+ * Calculates adaptive DPR ceiling. On mobile screens (DPR 2.6 - 3.5), strictly limits DPR to 1.25x.
+ * This relieves up to 75% GPU fill rate load, rendering 3D camera rotation and drag buttery smooth.
+ */
+export const getOptimalDpr = (scale = 1.0) => {
+  if (typeof window === 'undefined') return 1;
+  const rawDpr = window.devicePixelRatio || 1;
+  const isMobile = isMobileDevice();
+  const maxDpr = isMobile ? 1.25 : 2.0;
+  return Math.min(Math.max(rawDpr * scale, 0.75), maxDpr);
+};
+
 export const Viewport3D: React.FC<Viewport3DProps> = ({
   terrainConfig,
   heights,
@@ -893,6 +935,8 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   onToast,
   isRoadBuilderActive = false,
   onToggleRoadBuilder,
+  cameraTouchMode = 'rotate',
+  onCameraTouchModeChange,
 }) => {
   const mountRef = useRef<HTMLDivElement>(null);
 
@@ -954,7 +998,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   const [pinBPos, setPinBPos] = useState<[number, number, number]>(() => [18, 5, 16]);
   const [pinCPos, setPinCPos] = useState<[number, number, number]>(() => [0, 5, 2]);
   const [hasWaypointC, setHasWaypointC] = useState<boolean>(false);
-  const [showAStarNodes, setShowAStarNodes] = useState<boolean>(true);
+  const [showAStarNodes, setShowAStarNodes] = useState<boolean>(false);
   const [pinABoundId, setPinABoundId] = useState<string | null>(null);
   const [pinBBoundId, setPinBBoundId] = useState<string | null>(null);
   const [cameraFollowActive, setCameraFollowActive] = useState<boolean>(false);
@@ -978,6 +1022,15 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   const [isMinimized, setIsMinimized] = useState<boolean>(() => typeof window !== 'undefined' && window.innerWidth < 768);
   const [forceRoadNavVisible, setForceRoadNavVisible] = useState<boolean>(false);
   const [roadBuildCount, setRoadBuildCount] = useState<number>(0);
+  const [selectedRoadTextureId, setSelectedRoadTextureId] = useState<string>('classic_cobblestone');
+  const [customRoadTextureUrl, setCustomRoadTextureUrl] = useState<string | null>(null);
+  const [isTownsmenDemolishMode, setIsTownsmenDemolishMode] = useState<boolean>(false);
+  const isTownsmenDemolishModeRef = useRef<boolean>(false);
+  isTownsmenDemolishModeRef.current = isTownsmenDemolishMode;
+
+  const hoveredDemolishMeshRef = useRef<THREE.Mesh | null>(null);
+  const originalDemolishMatRef = useRef<THREE.Material | THREE.Material[] | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Road Build Mode: active if user toggled road builder, or selected a path category item, or path sculpt tool
   const isRoadModeActive =
@@ -991,7 +1044,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   const pinBPosRef = useRef<[number, number, number]>([18, 5, 16]);
   const pinCPosRef = useRef<[number, number, number]>([0, 5, 2]);
   const hasWaypointCRef = useRef<boolean>(false);
-  const showAStarNodesRef = useRef<boolean>(true);
+  const showAStarNodesRef = useRef<boolean>(false);
   const pinABoundIdRef = useRef<string | null>(null);
   const pinBBoundIdRef = useRef<string | null>(null);
   const cameraFollowActiveRef = useRef<boolean>(false);
@@ -1034,6 +1087,8 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   const lampBulbsRef = useRef<THREE.Material[]>([]);
   const animatedRotorsRef = useRef<{ obj: THREE.Object3D; speed: number }[]>([]);
   const wasHighPresetRef = useRef(false);
+  const lightSourceObjectsRef = useRef<PlacedObject[]>([]);
+  const lastPointLightUpdateRef = useRef<number>(0);
 
   // Interaction tracking
   const isMouseDownRef = useRef(false);
@@ -1154,19 +1209,18 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       isHeadlessOrBot ||
       /llvmpipe|swiftshader|mesa|software|cpu/i.test(unmaskedRenderer);
 
-    // Render resolution scale: renderer.setPixelRatio(window.devicePixelRatio * scale) with 2.0 clamp
-    const rawDpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
-    const dpr = Math.min(rawDpr, 2.0);
+    // Render resolution scale: strictly capped at 1.25 on mobile to eliminate camera navigation lag
+    const isMobile = isMobileDevice();
     const initialScale = propsRef.current.renderScale || 1.0;
-    renderer.setPixelRatio(Math.min(dpr * initialScale, 2.0));
+    renderer.setPixelRatio(getOptimalDpr(initialScale));
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.0;
 
-    // PCFSoftShadowMap enabled with high-definition resolution on HIGH (2048x2048)
+    // Mobile adaptive shadows: fast PCF on mobile, PCFSoft on desktop
     renderer.shadowMap.enabled = initialPreset !== 'LOW';
     if (renderer.shadowMap.enabled) {
-      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      renderer.shadowMap.type = isMobile ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
     }
     rendererRef.current = renderer;
 
@@ -1201,12 +1255,12 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     keyLight.position.set(...atm.sunPos);
     keyLight.castShadow = renderer.shadowMap.enabled;
     if (keyLight.shadow) {
-      const shadowRes = initialPreset === 'HIGH' ? 2048 : 1024;
+      const shadowRes = isMobile ? (initialPreset === 'HIGH' ? 1024 : 512) : (initialPreset === 'HIGH' ? 2048 : 1024);
       keyLight.shadow.mapSize.width = shadowRes;
       keyLight.shadow.mapSize.height = shadowRes;
-      keyLight.shadow.camera.near = 0.5;
+      keyLight.shadow.camera.near = 1.0;
       keyLight.shadow.camera.far = 320;
-      keyLight.shadow.bias = -0.00002;
+      keyLight.shadow.bias = isMobile ? -0.0001 : -0.00002;
       keyLight.shadow.normalBias = 0.05; // Eliminates black shadow acne when zooming in close
       const d = 95;
       keyLight.shadow.camera.left = -d;
@@ -1604,32 +1658,28 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         }
       }
 
-      // Budgeted point lights allocation to closest active lamps
+      // Budgeted point lights allocation to closest active lamps (throttled to 200ms)
       const pointLights = budgetedPointLightsRef.current;
       if (pointLights.length > 0) {
         if (dynAtm.lampGlowFactor > 0.02) {
-          const placed = propsRef.current.placedObjects;
-          const camPos = camera.position;
-          const lightSources = placed.filter(
-            (o) =>
-              o.type === 'street_lamp' ||
-              o.type === 'island_lighthouse' ||
-              o.type === 'fantasy_crystal' ||
-              o.type === 'desert_monolith' ||
-              o.type === 'alpine_cottage'
-          );
+          const now = performance.now();
+          const lightSources = lightSourceObjectsRef.current;
 
-          lightSources.sort((a, b) => {
-            const d1 =
-              (a.position[0] - camPos.x) ** 2 +
-              (a.position[1] - camPos.y) ** 2 +
-              (a.position[2] - camPos.z) ** 2;
-            const d2 =
-              (b.position[0] - camPos.x) ** 2 +
-              (b.position[1] - camPos.y) ** 2 +
-              (b.position[2] - camPos.z) ** 2;
-            return d1 - d2;
-          });
+          if (now - lastPointLightUpdateRef.current > 200) {
+            lastPointLightUpdateRef.current = now;
+            const camPos = camera.position;
+            lightSources.sort((a, b) => {
+              const d1 =
+                (a.position[0] - camPos.x) ** 2 +
+                (a.position[1] - camPos.y) ** 2 +
+                (a.position[2] - camPos.z) ** 2;
+              const d2 =
+                (b.position[0] - camPos.x) ** 2 +
+                (b.position[1] - camPos.y) ** 2 +
+                (b.position[2] - camPos.z) ** 2;
+              return d1 - d2;
+            });
+          }
 
           for (let i = 0; i < pointLights.length; i++) {
             if (i < lightSources.length) {
@@ -1746,6 +1796,21 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     const dpr = Math.min(rawDpr, 2.0);
     renderer.setPixelRatio(Math.min(dpr * renderScale, 2.0));
   }, [renderScale]);
+
+  // Synchronize OrbitControls touch and mouse interactions based on active Camera Touch Mode (Putar, Geser, Zoom)
+  useEffect(() => {
+    const controls = controlsRef.current;
+    if (!controls) return;
+    if (cameraTouchMode === 'pan') {
+      controls.touches.ONE = THREE.TOUCH.PAN;
+      controls.mouseButtons.LEFT = THREE.MOUSE.PAN;
+    } else if (cameraTouchMode === 'zoom') {
+      controls.mouseButtons.LEFT = THREE.MOUSE.DOLLY;
+    } else {
+      controls.touches.ONE = THREE.TOUCH.ROTATE;
+      controls.mouseButtons.LEFT = THREE.MOUSE.ROTATE;
+    }
+  }, [cameraTouchMode]);
 
   // Sync terrain geometry positions and colors when heights/colors change (Rule 3)
   useEffect(() => {
@@ -2376,6 +2441,72 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     return null;
   };
 
+  // Townsmen Demolish Red Material (Bright pulsing red highlight for road demolition)
+  const DEMOLISH_RED_MAT = useRef(
+    new THREE.MeshBasicMaterial({
+      color: 0xef4444,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.92,
+      wireframe: false,
+    })
+  ).current;
+
+  const clearDemolishHighlight = useCallback(() => {
+    if (hoveredDemolishMeshRef.current && originalDemolishMatRef.current) {
+      hoveredDemolishMeshRef.current.material = originalDemolishMatRef.current;
+      hoveredDemolishMeshRef.current = null;
+      originalDemolishMatRef.current = null;
+    }
+  }, []);
+
+  const highlightDemolishMesh = useCallback((mesh: THREE.Mesh) => {
+    if (hoveredDemolishMeshRef.current === mesh) return;
+    clearDemolishHighlight();
+    hoveredDemolishMeshRef.current = mesh;
+    originalDemolishMatRef.current = mesh.material;
+    mesh.material = DEMOLISH_RED_MAT;
+  }, [clearDemolishHighlight, DEMOLISH_RED_MAT]);
+
+  // Exclusive raycast against persistent roads for 100% safety against misclicks on buildings or terrain
+  const checkRoadIntersection = useCallback((clientX: number, clientY: number): THREE.Mesh | null => {
+    const container = mountRef.current;
+    const camera = cameraRef.current;
+    const roadGroup = persistentRoadGroupRef.current;
+    if (!container || !camera || !roadGroup) return null;
+
+    const rect = container.getBoundingClientRect();
+    _mouse.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+    _mouse.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+
+    _raycaster.setFromCamera(_mouse, camera);
+    const intersects = _raycaster.intersectObjects(roadGroup.children, true);
+
+    if (intersects.length > 0) {
+      let obj: THREE.Object3D | null = intersects[0].object;
+      while (obj && obj.parent !== roadGroup && obj !== roadGroup) {
+        obj = obj.parent;
+      }
+      if (obj instanceof THREE.Mesh) return obj;
+    }
+    return null;
+  }, []);
+
+  const handleUploadCustomTexture = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const dataUrl = ev.target?.result as string;
+      if (dataUrl) {
+        setCustomRoadTextureUrl(dataUrl);
+        setSelectedRoadTextureId('custom_png');
+        propsRef.current.onToast?.(`🖼️ Tekstur PNG kustom "${file.name}" berhasil diunggah dan aktif!`);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
   const recalculateRoute = useCallback(() => {
     const { heights, terrainConfig, placedObjects } = propsRef.current;
     const start = pinAPosRef.current;
@@ -2442,12 +2573,30 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   }, []);
 
   const updatePinPosition = (pinId: 'A' | 'B' | 'C', x: number, z: number) => {
-    const { heights, terrainConfig } = propsRef.current;
+    const { heights, terrainConfig, placedObjects } = propsRef.current;
     const maxRange = terrainConfig.size * 0.46;
-    const clampedX = Math.max(-maxRange, Math.min(maxRange, x));
-    const clampedZ = Math.max(-maxRange, Math.min(maxRange, z));
-    const groundY = getSampledHeightAt(clampedX, clampedZ, heights, terrainConfig.size, terrainConfig.resolution);
+    let clampedX = Math.max(-maxRange, Math.min(maxRange, x));
+    let clampedZ = Math.max(-maxRange, Math.min(maxRange, z));
 
+    // Prevent pins from being placed inside solid buildings (lighthouse, windmill, cottage, etc.)
+    for (const obj of placedObjects) {
+      if (
+        obj.category === 'building' ||
+        obj.category === 'cyber' ||
+        obj.type === 'island_lighthouse' ||
+        obj.type === 'stone_windmill' ||
+        obj.type === 'alpine_cottage'
+      ) {
+        const d = Math.hypot(clampedX - obj.position[0], clampedZ - obj.position[2]);
+        const minClearance = (obj.scale[0] || 1) * 3.8;
+        if (d < minClearance && d > 0.001) {
+          clampedX = obj.position[0] + ((clampedX - obj.position[0]) / d) * (minClearance + 0.3);
+          clampedZ = obj.position[2] + ((clampedZ - obj.position[2]) / d) * (minClearance + 0.3);
+        }
+      }
+    }
+
+    const groundY = getSampledHeightAt(clampedX, clampedZ, heights, terrainConfig.size, terrainConfig.resolution);
     const newPos: [number, number, number] = [clampedX, groundY, clampedZ];
 
     if (pinId === 'A') {
@@ -2732,10 +2881,27 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
 
     // Membuat mesh jalan paving 2D cobblestone permanen yang menempel mulus di atas kontur tanah
     if (persistentRoadGroupRef.current) {
-      const bakedMesh = createRouteRibbonMesh();
+      const bakedMesh = createRouteRibbonMesh({
+        textureId: selectedRoadTextureId,
+        customUrl: customRoadTextureUrl || undefined,
+      });
       bakedMesh.name = `PermanentRoadRibbon_${Date.now()}`;
+      bakedMesh.userData = {
+        isRoadMesh: true,
+        textureId: selectedRoadTextureId,
+        customUrl: customRoadTextureUrl || undefined,
+        points: [...currentRoutePointsRef.current],
+      };
       const roadWidth = (terrainConfig.trailWidth ?? 2.2) * 0.52;
-      updateRouteRibbonGeometry(bakedMesh, [...currentRoutePointsRef.current], roadWidth, false);
+      updateRouteRibbonGeometry(
+        bakedMesh,
+        [...currentRoutePointsRef.current],
+        roadWidth,
+        false,
+        heights,
+        terrainConfig.size,
+        terrainConfig.resolution
+      );
       persistentRoadGroupRef.current.add(bakedMesh);
     }
 
@@ -2756,7 +2922,8 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     setRoadBuildCount((prev) => prev + 1);
 
     if (onToast) {
-      onToast('✨ Jalan paving batu alam cobblestone & pembatas paving berhasil dibangun!');
+      const texName = ROAD_TEXTURE_PRESETS.find((p) => p.id === selectedRoadTextureId)?.name || 'Jalan Paving';
+      onToast(`✨ Jalan bertekstur ${texName} & pembatas paving berhasil dibangun menempel sempurna di lereng kontur!`);
     }
   };
 
@@ -2924,6 +3091,17 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       didDragRef.current = true;
     }
 
+    // Townsmen Demolish Mode: Raycast hover only over road meshes (bright glowing red highlight)
+    if (isTownsmenDemolishModeRef.current) {
+      const roadHit = checkRoadIntersection(e.clientX, e.clientY);
+      if (roadHit) {
+        highlightDemolishMesh(roadHit);
+      } else {
+        clearDemolishHighlight();
+      }
+      return;
+    }
+
     // Direct touch-drag for Navigation Pins A, B, and C with throttling to prevent frame drops
     if (draggingPinRef.current) {
       const now = performance.now();
@@ -3009,8 +3187,51 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
 
     if (controlsRef.current) controlsRef.current.enabled = true;
 
-    // Only trigger placement or selection if user simply clicked (didn't drag camera)
+    // Only trigger placement, selection, or demolition if user simply clicked (didn't drag camera)
     if (!didDragRef.current) {
+      // Townsmen Demolish Mode: safely delete clicked road mesh and restore terrain grass color
+      if (isTownsmenDemolishModeRef.current) {
+        const roadHit = checkRoadIntersection(e.clientX, e.clientY);
+        if (roadHit && persistentRoadGroupRef.current) {
+          clearDemolishHighlight();
+          persistentRoadGroupRef.current.remove(roadHit);
+          if (roadHit.geometry) roadHit.geometry.dispose();
+          if ((roadHit.material as any)?.dispose) (roadHit.material as any).dispose();
+
+          const roadPoints = roadHit.userData?.points as [number, number, number][] | undefined;
+          if (roadPoints && roadPoints.length > 0) {
+            const { heights, colors, terrainConfig, onTerrainBuffersChange } = propsRef.current;
+            const newColors = new Float32Array(colors);
+            const biomePal = BIOME_PALETTES[terrainConfig.biome] || BIOME_PALETTES.archipelago;
+            const grassColor = biomePal.stops[2] || [0.4, 0.28, 0.62, 0.24];
+            const res = terrainConfig.resolution;
+            const sz = terrainConfig.size;
+            for (const pt of roadPoints) {
+              for (let j = 0; j < res; j++) {
+                for (let i = 0; i < res; i++) {
+                  const vx = -sz / 2 + (i / (res - 1)) * sz;
+                  const vz = -sz / 2 + (j / (res - 1)) * sz;
+                  const d = Math.hypot(vx - pt[0], vz - pt[2]);
+                  if (d < 3.2) {
+                    const idx = (j * res + i) * 3;
+                    newColors[idx] = grassColor[1];
+                    newColors[idx + 1] = grassColor[2];
+                    newColors[idx + 2] = grassColor[3];
+                  }
+                }
+              }
+            }
+            if (onTerrainBuffersChange) {
+              onTerrainBuffersChange(heights, newColors);
+            }
+          }
+
+          propsRef.current.onToast?.('💥 Segmen jalan berhasil dibongkar dan rumput alami dipulihkan!');
+          setRoadBuildCount((prev) => Math.max(0, prev - 1));
+        }
+        return;
+      }
+
       const {
         brushSettings,
         activePaletteItem,
@@ -3250,7 +3471,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
           </button>
         </div>
       ) : isMinimized ? (
-        <div className="absolute left-2.5 sm:left-4 top-14 sm:top-18 z-40 pointer-events-auto">
+        <div className="absolute left-2.5 sm:left-4 top-16 sm:top-20 z-40 pointer-events-auto">
           <div className="flex items-center gap-1.5 sm:gap-2 bg-slate-950/90 backdrop-blur-md border border-slate-700/80 rounded-2xl px-2.5 sm:px-3.5 py-1.5 shadow-2xl text-xs">
             <div className="flex items-center gap-1.5">
               <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-pulse" />
@@ -3287,7 +3508,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
           </div>
         </div>
       ) : (
-        <div className="absolute left-2.5 sm:left-4 top-14 sm:top-18 z-40 w-[calc(100vw-20px)] max-w-[340px] sm:max-w-[365px] max-h-[72vh] overflow-y-auto overscroll-contain touch-pan-y scrollbar-thin scrollbar-thumb-slate-700 pointer-events-auto">
+        <div className="absolute left-2.5 sm:left-4 top-16 sm:top-20 z-40 w-[calc(100vw-20px)] max-w-[340px] sm:max-w-[365px] max-h-[72vh] overflow-y-auto overscroll-contain touch-pan-y scrollbar-thin scrollbar-thumb-slate-700 pointer-events-auto">
           <div className="bg-slate-950/90 backdrop-blur-xl border border-slate-800/90 rounded-2xl p-3 sm:p-3.5 shadow-2xl shadow-slate-950/80 flex flex-col gap-2.5 text-slate-200">
             {/* Header */}
             <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
@@ -3493,6 +3714,127 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
               <div className="text-[10.5px] text-slate-400 leading-snug">
                 🎮 <em>Kamera 100% bebas bergerak tanpa auto-lock. Putar, geser & zoom kapan saja di mana pun.</em>
               </div>
+            </div>
+
+            {/* 1. Galeri Pemilihan Tekstur Jalan PNG & Upload Kustom */}
+            <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-2.5 flex flex-col gap-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <ImageIcon className="w-3.5 h-3.5 text-cyan-400" />
+                  <span className="text-[11px] font-bold text-slate-200">Tekstur Jalan PNG</span>
+                </div>
+                <span className="text-[10px] text-cyan-400 font-medium truncate max-w-[170px]">
+                  {ROAD_TEXTURE_PRESETS.find((p) => p.id === selectedRoadTextureId)?.name || 'Custom PNG'}
+                </span>
+              </div>
+
+              {/* Grid 5 Presets + 1 Upload */}
+              <div className="grid grid-cols-3 gap-1.5">
+                {ROAD_TEXTURE_PRESETS.map((preset) => {
+                  const isSelected = selectedRoadTextureId === preset.id;
+                  if (preset.id === 'custom_png') {
+                    return (
+                      <button
+                        key={preset.id}
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        className={`p-1.5 rounded-lg border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                          isSelected
+                            ? 'bg-cyan-500/20 border-cyan-400 ring-1 ring-cyan-400/50'
+                            : 'bg-slate-950/60 border-slate-800 hover:bg-slate-800/80 hover:border-slate-700'
+                        }`}
+                        title="Upload file gambar PNG tekstur jalan sendiri dari perangkat"
+                      >
+                        <div className="flex items-center justify-between gap-1 mb-1">
+                          <span
+                            className="w-3 h-3 rounded-full border border-slate-600 shrink-0"
+                            style={{ backgroundColor: preset.previewColor }}
+                          />
+                          <span className="text-[9px] bg-cyan-500/30 text-cyan-300 px-1 py-0.2 rounded font-mono">
+                            {customRoadTextureUrl ? '✓ PNG' : '+ File'}
+                          </span>
+                        </div>
+                        <span className="text-[10px] font-bold text-slate-200 truncate">
+                          {customRoadTextureUrl ? 'PNG Kustom' : 'Upload PNG'}
+                        </span>
+                      </button>
+                    );
+                  }
+                  return (
+                    <button
+                      key={preset.id}
+                      type="button"
+                      onClick={() => setSelectedRoadTextureId(preset.id)}
+                      className={`p-1.5 rounded-lg border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                        isSelected
+                          ? 'bg-emerald-500/20 border-emerald-400 ring-1 ring-emerald-400/50'
+                          : 'bg-slate-950/60 border-slate-800 hover:bg-slate-800/80 hover:border-slate-700'
+                      }`}
+                      title={`${preset.name}: ${preset.desc}`}
+                    >
+                      <div className="flex items-center justify-between gap-1 mb-1">
+                        <span
+                          className="w-3 h-3 rounded-full border border-slate-600 shrink-0"
+                          style={{ backgroundColor: preset.previewColor }}
+                        />
+                        <span className="text-[9px] bg-slate-800 text-slate-300 px-1 py-0.2 rounded font-mono">
+                          {preset.badge}
+                        </span>
+                      </div>
+                      <span className="text-[10px] font-bold text-slate-200 truncate">
+                        {preset.name}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                onChange={handleUploadCustomTexture}
+                className="hidden"
+              />
+            </div>
+
+            {/* 2. Alat Hapus Jalan ala Townsmen (Sorot Merah) */}
+            <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-2.5 flex flex-col gap-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold text-slate-200">Alat Hapus Jalan (Townsmen)</span>
+                <span className="text-[10px] text-slate-400">Proteksi 100% Objek Lain</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsTownsmenDemolishMode((prev) => {
+                    const next = !prev;
+                    if (!next) clearDemolishHighlight();
+                    propsRef.current.onToast?.(
+                      next
+                        ? '🚜 Mode Hapus Jalan aktif! Sorot jalan (menyala merah) lalu klik untuk menghapus.'
+                        : 'Mode Hapus Jalan dimatikan.'
+                    );
+                    return next;
+                  });
+                }}
+                className={`w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                  isTownsmenDemolishMode
+                    ? 'bg-rose-600 hover:bg-rose-500 text-white ring-2 ring-rose-400 shadow-lg shadow-rose-950/50 animate-pulse'
+                    : 'bg-slate-800/90 hover:bg-slate-700 text-slate-300 border border-slate-700'
+                }`}
+                title="Aktifkan mode penghapus jalan ala Townsmen. Hanya menghapus segmen jalan yang disorot merah."
+              >
+                <Eraser className="w-4 h-4 text-rose-400" />
+                <span>
+                  {isTownsmenDemolishMode ? 'Mode Hapus Aktif (Klik Jalan Merah)' : 'Mode Hapus Jalan (Townsmen)'}
+                </span>
+              </button>
+              {isTownsmenDemolishMode && (
+                <div className="text-[10px] text-rose-300 leading-tight bg-rose-950/40 p-1.5 rounded-lg border border-rose-800/50">
+                  ⚠️ <em>Hanya segmen jalan yang dapat disorot dan dihapus. Bangunan, pohon, dan pulau aman 100%.</em>
+                </div>
+              )}
             </div>
 
             {/* Action Buttons Row */}

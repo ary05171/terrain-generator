@@ -91,9 +91,10 @@ export const TopBar: React.FC<TopBarProps> = ({
         <div>
           <div className="flex items-center gap-1.5">
             <span className="font-bold text-xs sm:text-sm tracking-wide text-white whitespace-nowrap">
-              TerraForge 3D
+              <span className="hidden xs:inline">TerraForge 3D</span>
+              <span className="xs:hidden">TF3D</span>
             </span>
-            <span className="text-[10px] font-semibold uppercase px-1.5 py-0.2 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+            <span className="hidden xs:inline-block text-[10px] font-semibold uppercase px-1.5 py-0.2 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
               {biome}
             </span>
           </div>
@@ -191,7 +192,7 @@ export const TopBar: React.FC<TopBarProps> = ({
             <button
               type="button"
               onClick={() => onCameraTouchModeChange('rotate')}
-              className={`flex items-center gap-1 px-2 sm:px-2.5 py-1 min-h-[30px] rounded-lg text-[11px] sm:text-xs font-bold transition-all cursor-pointer ${
+              className={`flex items-center gap-1 px-1.5 sm:px-2.5 py-1 min-h-[30px] rounded-lg text-[11px] sm:text-xs font-bold transition-all cursor-pointer ${
                 cameraTouchMode === 'rotate'
                   ? 'bg-gradient-to-r from-emerald-500 to-teal-400 text-slate-950 shadow-md shadow-emerald-950/40'
                   : 'text-slate-300 hover:text-white hover:bg-slate-800/70'
@@ -199,13 +200,13 @@ export const TopBar: React.FC<TopBarProps> = ({
               title="Mode Putar: Sentuh 1 jari di layar untuk memutar kamera 360°"
             >
               <RotateCw className="w-3.5 h-3.5" />
-              <span>Putar</span>
+              <span className="hidden sm:inline">Putar</span>
             </button>
 
             <button
               type="button"
               onClick={() => onCameraTouchModeChange('pan')}
-              className={`flex items-center gap-1 px-2 sm:px-2.5 py-1 min-h-[30px] rounded-lg text-[11px] sm:text-xs font-bold transition-all cursor-pointer ${
+              className={`flex items-center gap-1 px-1.5 sm:px-2.5 py-1 min-h-[30px] rounded-lg text-[11px] sm:text-xs font-bold transition-all cursor-pointer ${
                 cameraTouchMode === 'pan'
                   ? 'bg-gradient-to-r from-cyan-500 to-sky-400 text-slate-950 shadow-md shadow-cyan-950/40'
                   : 'text-slate-300 hover:text-white hover:bg-slate-800/70'
@@ -213,13 +214,13 @@ export const TopBar: React.FC<TopBarProps> = ({
               title="Mode Geser: Sentuh 1 jari di layar untuk menggeser pulau (Pan)"
             >
               <Move className="w-3.5 h-3.5" />
-              <span>Geser</span>
+              <span className="hidden sm:inline">Geser</span>
             </button>
 
             <button
               type="button"
               onClick={() => onCameraTouchModeChange('zoom')}
-              className={`flex items-center gap-1 px-2 sm:px-2.5 py-1 min-h-[30px] rounded-lg text-[11px] sm:text-xs font-bold transition-all cursor-pointer ${
+              className={`flex items-center gap-1 px-1.5 sm:px-2.5 py-1 min-h-[30px] rounded-lg text-[11px] sm:text-xs font-bold transition-all cursor-pointer ${
                 cameraTouchMode === 'zoom'
                   ? 'bg-gradient-to-r from-amber-500 to-yellow-400 text-slate-950 shadow-md shadow-amber-950/40'
                   : 'text-slate-300 hover:text-white hover:bg-slate-800/70'
@@ -227,7 +228,7 @@ export const TopBar: React.FC<TopBarProps> = ({
               title="Mode Zoom: Sentuh 1 jari geser atas/bawah untuk zoom in/out"
             >
               <ZoomIn className="w-3.5 h-3.5" />
-              <span>Zoom</span>
+              <span className="hidden sm:inline">Zoom</span>
             </button>
           </div>
         )}
